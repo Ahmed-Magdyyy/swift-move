@@ -1,6 +1,6 @@
 const socketConfig = require("./socketConfig");
 
-// Start the socket server on port 3001
+// Start the socket server on port 3005
 const server = socketConfig.initSocketServer();
 
 // Handle unhandled rejections
