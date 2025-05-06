@@ -36,7 +36,7 @@ dbConnection();
 mountRoutes(app)
 
 app.get('/', (req, res) => {
-  res.send('Course Management API is running.');
+  res.send('ٍSwift move API is running.');
 });
 
 app.all("*", (req, res, next) => {
