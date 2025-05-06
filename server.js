@@ -46,9 +46,9 @@ app.get('/', (req, res) => {
   res.send('Course Management API is running.');
 });
 
-app.all("*", (req, res, next) => {
-  next(new ApiError(`can't find this route: ${req.originalUrl}`, 400));
-});
+// app.all("*", (req, res, next) => {
+//   next(new ApiError(`can't find this route: ${req.originalUrl}`, 400));
+// });
 
 // Global error handling middleware
 app.use(globalError);
