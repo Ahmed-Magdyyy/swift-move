@@ -11,16 +11,7 @@ const ApiError = require("./utils/ApiError");
 const globalError = require("./middlewares/errorMiddleware");
 const dbConnection = require("./config/database");
 
-console.log('====================================');
-console.log(process.env.MONGO_URI);
-console.log('====================================');
-
-// DB connecetion
-dbConnection();
-
 const socketConfig = require("./socketConfig");
-
-
 
 // Routes
 const mountRoutes = require("./routes");
@@ -38,6 +29,8 @@ if (process.env.NODE_ENV === "development") {
   console.log(`mode: ${process.env.NODE_ENV}`);
 }
 
+// DB connecetion
+dbConnection();
 
 // Mount Routes
 mountRoutes(app)
@@ -46,9 +39,9 @@ app.get('/', (req, res) => {
   res.send('Course Management API is running.');
 });
 
-// app.all("*", (req, res, next) => {
-//   next(new ApiError(`can't find this route: ${req.originalUrl}`, 400));
-// });
+app.all("*", (req, res, next) => {
+  next(new ApiError(`can't find this route: ${req.originalUrl}`, 400));
+});
 
 // Global error handling middleware
 app.use(globalError);
