@@ -1,4 +1,5 @@
 const ApiError = require("../utils/ApiError");
+const { deleteImageCloud } = require("../utils/Cloudinary/cloud");
 
 const handelJwtInvalidSignature = () =>
   new ApiError("Invalid token, Please login again", 401);
@@ -22,7 +23,11 @@ const sendErrorForprod = (err, res) => {
   });
 };
 
-const globalError = (err, req, res, next) => {
+const globalError =async (err, req, res, next) => {
+  // for cloudinary
+  if( req.failImage){
+     await deleteImageCloud( req.failImage.public_id)
+  }
   err.statusCode = err.statusCode || 500;
   err.status = err.status || "error";
   if (process.env.NODE_ENV === "development") {

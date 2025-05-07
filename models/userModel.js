@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
+const { roles, accountStatus, providers } = require("../utils/Constant/enum");
 
 const userSchema = new mongoose.Schema(
   {
@@ -19,9 +20,16 @@ const userSchema = new mongoose.Schema(
       type: String,
       unique: [true, "Phone must be unique"],
     },
+    provider:{
+    type:String ,
+    enum :Object.values(providers),
+    default :providers.SYSTEM
+    },
     password: {
       type: String,
-      required: [true, "Password is required"],
+      required: function(){
+      return this.provider == "system" ? true :false
+      },
       minlength: [6, "Password must be at least 6 characters"],
     },
     passwordChangedAT: Date,
@@ -30,22 +38,34 @@ const userSchema = new mongoose.Schema(
     passwordResetCodeVerified: Boolean,
     role: {
       type: String,
-      enum: ["customr", "driver", "admin", "superAdmin"],
-      default: "customr",
+      enum: Object.values(roles),
+      default: roles.CUSTOMER,
     },
-    enabledControls: { type: [String] },
+    enabledControls: { type: [String] ,
+     
+   },
     account_status: {
       type: String,
-      enum: ["pending", "confirmed"],
-      default: "pending",
+      enum: Object.values(accountStatus),
+      default: accountStatus.PENDING,
     },
     active: {
       type: Boolean,
       default: true,
     },
     image: {
-      type: String,
-      default: null,
+      secure_url:{
+        type:String,
+        required: function(){
+          return this.provider == "system" ? true :false
+          },
+      },
+      public_id:{
+        type:String,
+        required: function(){
+          return this.provider == "system" ? true :false
+          },
+      }
     },
   },
   {
@@ -56,6 +76,9 @@ const userSchema = new mongoose.Schema(
       transform: (doc, ret)=>{
         delete ret.id;
         delete ret.__v
+        if (ret.role !== roles.ADMIN) {
+          delete ret.enabledControls;
+        }
         return ret
       }
      },
@@ -71,10 +94,11 @@ userSchema.pre("save", async function (next) {
 });
 
 // Virtual for image URL
-userSchema.virtual('imageUrl').get(function() {
-  if (!this.image) return null;
-  return `${process.env.BASE_URL}/uploads/users/${this.image}`;
-});
+// userSchema.virtual('imageUrl').get(function() {
+//   if (!this.image) return null;
+//   return `${process.env.BASE_URL}/uploads/users/${this.image.public_id}`;
+
+// });
 
 const user = mongoose.model("user", userSchema);
 module.exports = user;

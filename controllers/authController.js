@@ -6,20 +6,50 @@ const usersModel = require("../models/userModel");
 
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
-const sendEmail = require("../utils/sendEmails");
+const sendEmail = require("../utils/Email/sendEmails");
 const createToken = require("../utils/createToken");
+const { verifyGoogle } = require("../utils/VerifyGoogle/verifyGoogle");
+const { providers, accountStatus, roles } = require("../utils/Constant/enum");
+const { cloudinary } = require("../utils/Cloudinary/cloud");
+const { emailHtml } = require("../utils/Email/emailHtml");
 
 exports.signup = asyncHandler(async (req, res, next) => {
+  //get data from req
+  let {name , email , phone , password , role ,timezone} = req.body
+  //check exist 
+  const userExist = await usersModel.findOne({email})
+  if(userExist){
+    return next(new ApiError("User Already Exist", 409))
+  }
+  //upload Image
+  let secure_url, public_id;
+  try {
+    // Upload image
+    const uploadResult = await cloudinary.uploader.upload(req.file.path, {
+      folder: "Swift-Move/Users/Profile",
+    });
+    secure_url = uploadResult.secure_url;
+    public_id = uploadResult.public_id;
+  } catch (err) {
+    return next(new ApiError("Image upload failed", 500));
+  }
+  try{
   // Create a new user
-  const user = await usersModel.create({
-    name: req.body.name,
-    email: req.body.email,
-    phone: req.body.phone,
-    password: req.body.password,
-    role: req.body.role||"customer",
-    timezone: req.body.timezone
+  const user = new usersModel({
+    name,
+    email,
+    phone,
+    password,
+    role,
+    image:{secure_url,public_id},
+    timezone
   });
-
+//save in db 
+const userCreated = await user.save()
+if(!userCreated){
+  req.failImage = {secure_url,public_id}
+  return next(new ApiError("User Fail To Created",500))
+}
   // Generate access token 
   const token = createToken(user._id, user.role);
 
@@ -30,190 +60,25 @@ exports.signup = asyncHandler(async (req, res, next) => {
 
     let img ="https://logowik.com/content/uploads/images/free-food-delivery8485.logowik.com.webp"
 
-  let emailTamplate = `<!DOCTYPE html>
-  <html lang="en-US">
-    <head>
-      <meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
-      <title>Confirm Your Email</title>
-      <meta name="description" content="Reset Password Email" />
-      <style type="text/css">
-        a:hover {
-          text-decoration: underline !important;
-        }
-      </style>
-    </head>
 
-    <body
-      marginheight="0"
-      topmargin="0"
-      marginwidth="0"
-      style="margin: 0px; background-color: #f2f3f8"
-      leftmargin="0"
-    >
-      <!--100% body table-->
-      <table
-        cellspacing="0"
-        border="0"
-        cellpadding="0"
-        width="100%"
-        bgcolor="#f2f3f8"
-        style="
-          @import url(https://fonts.googleapis.com/css?family=Rubik:300,400,500,700|Open+Sans:300,400,600,700);
-          font-family: 'Open Sans', sans-serif;
-        "
-      >
-        <tr>
-          <td>
-            <table
-              style="background-color: #f2f3f8; max-width: 670px; margin: 0 auto"
-              width="100%"
-              border="0"
-              align="center"
-              cellpadding="0"
-              cellspacing="0"
-            >
-              <tr>
-                <td style="height: 80px">&nbsp;</td>
-              </tr>
-              <tr>
-                <td style="text-align: center">
-                  <a href="" title="logo" target="_blank">
-                    <img
-                      width="250"
-                      src=${img}
-                      title="logo"
-                      alt="logo"
-                    />
-                  </a>
-                </td>
-              </tr>
-              <tr>
-                <td style="height: 20px">&nbsp;</td>
-              </tr>
-              <tr>
-                <td>
-                  <table
-                    width="95%"
-                    border="0"
-                    align="center"
-                    cellpadding="0"
-                    cellspacing="0"
-                    style="
-                      max-width: 670px;
-                      background: #fff;
-                      border-radius: 3px;
-                      text-align: center;
-                      -webkit-box-shadow: 0 6px 18px 0 rgba(0, 0, 0, 0.06);
-                      -moz-box-shadow: 0 6px 18px 0 rgba(0, 0, 0, 0.06);
-                      box-shadow: 0 6px 18px 0 rgba(0, 0, 0, 0.06);
-                    "
-                  >
-                    <tr>
-                      <td style="height: 40px">&nbsp;</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 0 35px">
-                        <span
-                          style="
-                            display: inline-block;
-                            vertical-align: middle;
-                            margin: 29px 0 26px;
-                            border-bottom: 1px solid #cecece;
-                            width: 200px;
-                          "
-                        ></span>
-                        <p
-                          style="
-                            color: #455056;
-                            font-size: 17px;
-                            line-height: 24px;
-                            text-align: left;
-                          "
-                        >
-                          Hello ${capitalizeFirlstLetterOfName},</p>
-                        <p
-                          style="
-                            color: #455056;
-                            font-size: 17px;
-                            line-height: 24px;
-                            text-align: left;
-                          "
-                        >
-                          Thank you for registering in Swift move. To start using your account please confirm your email address by clicking on the confirm your email button.
-                        </p>
-                        <a target="_blank" href="http://localhost:3000/api/v1/auth/confirm-email/${token}"
-                        style="background:#20e277;text-decoration:none !important; font-weight:500; margin-top:25px; color:#fff;text-transform:uppercase; font-size:14px;padding:10px 24px;display:inline-block;border-radius:50px;">Confirm Your Email</a>
-
-                        <p
-                          style="
-                            color: #455056;
-                            font-size: 17px;
-                            line-height: 24px;
-                            text-align: left;
-                          "
-                        >
-                          Welcome to Swift move,
-                        </p>
-                        <p
-                          style="
-                          margin-top: 3px;
-                            color: #455056;
-                            font-size: 17px;
-                            line-height: 2px;
-                            text-align: left;
-                          "
-                        >
-                          The Jaweed Team.
-                        </p>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="height: 40px">&nbsp;</td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-
-              <tr>
-                <td style="height: 20px">&nbsp;</td>
-              </tr>
-              <tr>
-                <td style="text-align: center">
-                  <p
-                    style="
-                      font-size: 14px;
-                      color: rgba(69, 80, 86, 0.7411764705882353);
-                      line-height: 18px;
-                      margin: 0 0 0;
-                    "
-                  >
-                    &copy; <strong>https://</strong>
-                  </p>
-                </td>
-              </tr>
-              <tr>
-                <td style="height: 80px">&nbsp;</td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-      <!--/100% body table-->
-    </body>
-  </html>`;
 
   try {
     await sendEmail({
       email: user.email,
       subject: `${capitalizeFirlstLetterOfName}, Please confirm your account`,
-      message: emailTamplate,
+      message: emailHtml(capitalizeFirlstLetterOfName  ,img ,token),
     });
     console.log("Email sent");
   } catch (error) {
     console.log(error);
   }
 
-  res.status(201).json({ data: user, token });
+  res.status(201).json({ data: userCreated, token });
+  } catch (error) {
+    req.failImage = { secure_url, public_id };
+    return next(error);
+  }
+
 });
 
 exports.confirmEmail = asyncHandler(async (req, res, next) => {
@@ -609,3 +474,27 @@ exports.resetPassword = asyncHandler(async (req, res, next) => {
   const token = createToken(user._id, user.role);
   res.status(200).json({ token });
 });
+//login by google
+exports.loginByGoogle =asyncHandler(async (req,res,next)=>{
+//get id token from req
+let {idToken}=req.body
+//check token from google
+let {email , name} = await verifyGoogle(idToken)
+//check user exist 
+let userExist = await usersModel.findOne({email})
+if(!userExist){
+  userExist = await usersModel.create({
+    email,
+    name,
+    provider:providers.GOOGLE,
+    account_status:accountStatus.CONFIRMED,
+    phone:undefined
+  })
+}
+//generate token 
+const accessToken = createToken(userExist._id, userExist.role);
+//send response 
+return res.status(200).json({message:"User Login Successfully",success:true ,
+  access_token:accessToken
+})
+} )
