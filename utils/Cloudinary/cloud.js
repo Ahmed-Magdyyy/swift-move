@@ -3,7 +3,6 @@ const dotenv = require("dotenv");
 const path = require("path");
 
 dotenv.config({path:path.resolve("./.env")})
-console.log(`${process.env.MONGO_URI}`);
 
 //cloudinary 
 cloudinary.config({

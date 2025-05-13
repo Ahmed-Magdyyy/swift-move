@@ -3,7 +3,7 @@ const nodemailer = require("nodemailer");
 const sendEmail = async (options) => {
   // creating the transporter ( service that will send email like gmail)
   const transporter = nodemailer.createTransport({
-    service: "hostinger",
+    // service: "hostinger",
     name: process.env.EMAIL_HOST,
     host: process.env.EMAIL_HOST,
     port: process.env.EMAIL_PORT, // if secure true => port = 465 || if secure false => port = 587
@@ -19,7 +19,7 @@ const sendEmail = async (options) => {
 
   // define email options ( from , to , subject , email content )
   const emailOptions = {
-    from: "jawwid team <info@jawwid.com>",
+    from: "Swift move <bohy.ahmed@gmail.com>",
     to: options.email,
     subject: options.subject,
     html: options.message,

@@ -6,6 +6,7 @@ const PORT = process.env.PORT || 3000;
 const morgan = require("morgan");
 const cors = require("cors");
 const path = require("path");
+const cookieParser = require("cookie-parser");
 
 const ApiError = require("./utils/ApiError");
 const globalError = require("./middlewares/errorMiddleware");
@@ -23,6 +24,7 @@ app.use(express.urlencoded({ extended: false }));
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "uploads")));
+app.use(cookieParser());
 
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));

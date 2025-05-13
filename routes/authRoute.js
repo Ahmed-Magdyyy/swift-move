@@ -1,29 +1,60 @@
 const express = require("express");
 
 const {
+  signupValidator,
+  loginValidator,
+  forgetPasswordValidator,
+  googleLoginValidator,
+  resendConfirmationValidator,
+  resetPasswordValidator,
+  verifyResetCodeValidator,
+} = require("../Validation/authValidator");
+
+const {
   signup,
   login,
+  logout,
   forgetPassword,
   verifyPasswordResetCode,
   resetPassword,
   confirmEmail,
-  loginByGoogle
+  loginByGoogle,
+  resendConfirmationEmail,
+  refreshToken,
+  protect,
 } = require("../controllers/authController");
 const { cloudUpload } = require("../utils/Cloudinary/cloudUpload");
 
-const userValidation = require('../Validation/user.validation');
-const isValid = require("../middlewares/validatorMiddleware");
-
-
+// const userValidation = require("../Validation/user.validation");
+// const isValid = require("../middlewares/validatorMiddleware");
 
 const Router = express.Router();
 
-Router.post("/signup",cloudUpload({}).single("image"),isValid(userValidation.signUp), signup);
-Router.post("/login", login);
-Router.post("/forgetPassword", forgetPassword);
-Router.post("/verifyResetcode", verifyPasswordResetCode);
-Router.put("/resetPassword", resetPassword);
+Router.post(
+  "/signup",
+  cloudUpload({}).single("image"),
+  signupValidator,
+  signup
+);
+Router.post("/login", loginValidator, login);
+Router.post("/forgetPassword", forgetPasswordValidator, forgetPassword);
+Router.post(
+  "/verifyResetcode",
+  verifyResetCodeValidator,
+  verifyPasswordResetCode
+);
+Router.put("/resetPassword", resetPasswordValidator, resetPassword);
 Router.get("/confirm-email/:token", confirmEmail);
-Router.post("/google-login",loginByGoogle)
+Router.post(
+  "/resend-confirmation",
+  resendConfirmationValidator,
+  resendConfirmationEmail
+);
+Router.post("/refresh-token", refreshToken);
+Router.post("/google-login", googleLoginValidator, loginByGoogle);
+
+Router.use(protect);
+
+Router.post("/logout", logout);
 
 module.exports = Router;

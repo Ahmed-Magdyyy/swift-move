@@ -1,23 +1,25 @@
-const roles ={
-    CUSTOMER:"customer",
-    DERIVER:"driver",
-    ADMIN:"admin",
-    SUPER_ADMIN:"superAdmin"
-}
-Object.freeze(roles)
+const roles = {
+  CUSTOMER: "customer",
+  DRIVER: "driver",
+  ADMIN: "admin",
+  SUPER_ADMIN: "superAdmin",
+};
 const accountStatus = {
-    PENDING:"pending",
-    CONFIRMED:"confirmed"
-}
-Object.freeze(accountStatus)
+  PENDING: "pending",
+  CONFIRMED: "confirmed",
+};
 //provider
 const providers = {
-    SYSTEM:"system",
-    GOOGLE : "google"
-}
-Object.freeze(providers)
+  SYSTEM: "system",
+  GOOGLE: "google",
+};
+
+Object.freeze(roles);
+Object.freeze(accountStatus);
+Object.freeze(providers);
+
 module.exports = {
-    roles,
-    accountStatus,
-    providers
-  };
+  roles,
+  accountStatus,
+  providers,
+};

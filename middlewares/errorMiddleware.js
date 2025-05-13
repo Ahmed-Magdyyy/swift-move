@@ -8,9 +8,10 @@ const handelJwtExpire = () =>
   new ApiError("Expired token, Please login again", 401);
 
 const sendErrorForDev = (err, res) => {
+  console.log(err)
   return res.status(err.statusCode).json({
     status: err.status,
-    error: err,
+    error: err.errors || [],
     message: err.message,
     stack: err.stack,
   });
@@ -20,12 +21,13 @@ const sendErrorForprod = (err, res) => {
   return res.status(err.statusCode).json({
     status: err.status,
     message: err.message,
+    errors: err.errors || []
   });
 };
 
 const globalError =async (err, req, res, next) => {
   // for cloudinary
-  if( req.failImage){
+  if( req.failImage?.public_id){
      await deleteImageCloud( req.failImage.public_id)
   }
   err.statusCode = err.statusCode || 500;

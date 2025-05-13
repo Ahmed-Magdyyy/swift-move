@@ -7,142 +7,291 @@ const usersModel = require("../models/userModel");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const sendEmail = require("../utils/Email/sendEmails");
-const createToken = require("../utils/createToken");
+const {
+  createAccessToken,
+  createRefreshToken,
+  createConfirmationToken,
+} = require("../utils/createToken");
 const { verifyGoogle } = require("../utils/VerifyGoogle/verifyGoogle");
 const { providers, accountStatus, roles } = require("../utils/Constant/enum");
 const { cloudinary } = require("../utils/Cloudinary/cloud");
-const { emailHtml } = require("../utils/Email/emailHtml");
+const {
+  confirmEmailHtml,
+  forgetPasswordEmailHTML,
+} = require("../utils/Email/emailHtml");
 
 exports.signup = asyncHandler(async (req, res, next) => {
   //get data from req
-  let {name , email , phone , password , role ,timezone} = req.body
-  //check exist 
-  const userExist = await usersModel.findOne({email})
-  if(userExist){
-    return next(new ApiError("User Already Exist", 409))
+  let { name, email, phone, password, role } = req.body;
+
+  //check exist
+  const userExist = await usersModel.findOne({ email });
+  if (userExist) {
+    return next(new ApiError("User Already Exist", 409));
   }
-  //upload Image
+
+  // upload Image to cloudinary
   let secure_url, public_id;
-  try {
-    // Upload image
-    const uploadResult = await cloudinary.uploader.upload(req.file.path, {
-      folder: "Swift-Move/Users/Profile",
-    });
-    secure_url = uploadResult.secure_url;
-    public_id = uploadResult.public_id;
-  } catch (err) {
-    return next(new ApiError("Image upload failed", 500));
-  }
-  try{
-  // Create a new user
-  const user = new usersModel({
-    name,
-    email,
-    phone,
-    password,
-    role,
-    image:{secure_url,public_id},
-    timezone
-  });
-//save in db 
-const userCreated = await user.save()
-if(!userCreated){
-  req.failImage = {secure_url,public_id}
-  return next(new ApiError("User Fail To Created",500))
-}
-  // Generate access token 
-  const token = createToken(user._id, user.role);
 
-  // send confirmation email
-  let capitalizeFirlstLetterOfName =
-    user.name.split(" ")[0].charAt(0).toUpperCase() +
-    user.name.split(" ")[0].slice(1).toLocaleLowerCase();
-
-    let img ="https://logowik.com/content/uploads/images/free-food-delivery8485.logowik.com.webp"
-
-
-
-  try {
-    await sendEmail({
-      email: user.email,
-      subject: `${capitalizeFirlstLetterOfName}, Please confirm your account`,
-      message: emailHtml(capitalizeFirlstLetterOfName  ,img ,token),
-    });
-    console.log("Email sent");
-  } catch (error) {
-    console.log(error);
+  if (req.file) {
+    try {
+      const uploadResult = await cloudinary.uploader.upload(req.file.path, {
+        folder: "Swift-Move/Users/Profile",
+      });
+      secure_url = uploadResult.secure_url;
+      public_id = uploadResult.public_id;
+    } catch (err) {
+      return next(new ApiError("Image upload failed", 500));
+    }
   }
 
-  res.status(201).json({ data: userCreated, token });
+console.log('====================================');
+console.log(req.file);
+console.log('====================================');
+
+  try {
+    // Create a new user
+    const user = await usersModel.create({
+      name,
+      email,
+      phone,
+      password,
+      role,
+      image: { secure_url, public_id },
+      account_status: "pending",
+    });
+
+    // Generate confirmation token
+    const confirmationToken = createConfirmationToken(user._id);
+
+    // send confirmation email
+    let capitalizeFirlstLetterOfName =
+      user.name.split(" ")[0].charAt(0).toUpperCase() +
+      user.name.split(" ")[0].slice(1).toLocaleLowerCase();
+
+    try {
+      await sendEmail({
+        email: user.email,
+        subject: `${capitalizeFirlstLetterOfName}, Please confirm your account`,
+        message: confirmEmailHtml(
+          capitalizeFirlstLetterOfName,
+          confirmationToken
+        ),
+      });
+      console.log("Email sent");
+    } catch (error) {
+      console.log(error);
+    }
+
+    res.status(201).json({
+      message: "User created. Please check your email for confirmation.",
+      data: user,
+      confirmationToken
+    });
   } catch (error) {
+    await cloudinary.uploader.destroy(public_id);
     req.failImage = { secure_url, public_id };
-    return next(error);
+    return next(new ApiError("Registration failed", 500));
   }
-
 });
 
 exports.confirmEmail = asyncHandler(async (req, res, next) => {
-  let token = req.params.token;
-  const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+  const { token } = req.params;
 
-  let user = await usersModel.findById(decoded.userId);
+  try {
+    // Verify confirmation token
+    const decoded = jwt.verify(token, process.env.JWT_CONFIRMATION_SECRET);
 
-  if (user.account_status !== "confirmed") {
+    // Check expiration
+    if (Date.now() >= decoded.exp * 1000) {
+      return next(new ApiError("Confirmation link has expired", 401));
+    }
+
+    const user = await usersModel.findById(decoded.userId);
+    if (!user) return next(new ApiError("User not found", 404));
+
+    if (user.account_status === "confirmed") {
+      return res.status(200).json({ message: "Email already confirmed" });
+    }
+
+    // Update user status
     user.account_status = "confirmed";
+
+    // Generate tokens
+    const accessToken = createAccessToken(user._id, user.role);
+    const refreshToken = createRefreshToken(user._id);
+
+    // Store hashed refresh token to DB
+    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+    user.refreshTokens.push({
+      token: hashedRefreshToken,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+    });
+
     await user.save();
 
-    res.status(200).json({message:"account confirmed successfully"});
-    // res.redirect("");
-  } else {
-    res.send({ message: "Email already confirmed" });
+    // Set refresh token in cookie
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    });
+
+    res.status(200).send("Account confirmed successfully");
+  } catch (error) {
+    return next(new ApiError("Invalid confirmation token", 401));
   }
 });
 
-exports.login = asyncHandler(async (req, res, next) => {
-  const user = await usersModel.findOne({ email: req.body.email });
+exports.resendConfirmationEmail = asyncHandler(async (req, res, next) => {
+  const { email } = req.body;
 
-  if (!user || !(await bcrypt.compare(req.body.password, user.password))) {
+  const user = await usersModel.findOne({ email });
+  if (!user) return next(new ApiError("User not found", 404));
+
+  if (user.account_status === "confirmed") {
+    return next(new ApiError("Email already confirmed", 400));
+  }
+
+  // Generate new confirmation token
+  const confirmationToken = createConfirmationToken(user._id);
+
+  const capitalizeFirlstLetterOfName =
+    user.name.split(" ")[0].charAt(0).toUpperCase() +
+    user.name.split(" ")[0].slice(1).toLowerCase();
+
+  await sendEmail({
+    email: user.email,
+    subject: `${capitalizeFirlstLetterOfName}, Please confirm your account`,
+    html: confirmEmailHtml(capitalizeFirlstLetterOfName, confirmationToken),
+  });
+
+  res.status(200).json({ message: "Confirmation email resent", confirmationToken});
+});
+
+exports.login = asyncHandler(async (req, res, next) => {
+  const { email, password } = req.body;
+
+  const user = await usersModel.findOne({ email }).select("+password");
+  if (!user || !(await bcrypt.compare(password, user.password))) {
     return next(new ApiError("Incorrect email or password", 401));
   }
 
   if (user.account_status !== "confirmed") {
+    return next(new ApiError("Please confirm your email first", 401));
+  }
+
+  if (!user.active) {
     return next(
       new ApiError(
-        "Your email is not confirmed, Check your email and click on the confirmation link and then login again",
+        "Account has been deactivated. Contact customer support",
         401
       )
     );
-  } else {
-    const token = createToken(user._id, user.role);
+  }
 
-    // // Set token in cookies
-    // res.cookie("token", token, {
-    //   maxAge:  process.env.JWT_EXPIRE_TIME, // Set cookie expiration
-    //   httpOnly: true, // Cookie is only accessible via HTTP(S)
-    //   secure: req.secure || req.headers["x-forwarded-proto"] === "https", // Set secure flag based on request protocol
-    // });
+  // Generate tokens
+  const accessToken = createAccessToken(user._id, user.role);
+  const refreshToken = createRefreshToken(user._id);
 
-    // Send response with user data and token
-    res.status(200).json({ data: user, token });
+  // Store hashed refresh token
+  const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+  user.refreshTokens.push({
+    token: hashedRefreshToken,
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+  });
+  await user.save();
+
+  // Set refresh token cookie
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "Strict",
+    maxAge: 30 * 24 * 60 * 60 * 1000,
+  });
+
+  res.status(200).json({
+    data: {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      provider: user.provider,
+      image: user.image, // Only include necessary fields
+    },
+    accessToken,
+    accessTokenExpires: new Date(Date.now() + 3 * 60 * 60 * 1000),
+  });
+});
+
+exports.refreshToken = asyncHandler(async (req, res, next) => {
+  const refreshToken = req.cookies.refreshToken;
+  if (!refreshToken) return next(new ApiError("Unauthorized", 401));
+
+  try {
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    const user = await usersModel.findById(decoded.userId);
+
+    // Find matching token
+    const tokenMatch = await Promise.all(
+      user.refreshTokens.map(async (storedToken) => ({
+        ...storedToken,
+        match: await bcrypt.compare(refreshToken, storedToken.token),
+      }))
+    );
+
+    const validToken = tokenMatch.find((t) => t.match);
+    if (!validToken) return next(new ApiError("Invalid token", 401));
+
+    // Generate new tokens
+    const newAccessToken = createAccessToken(user._id, user.role);
+    const newRefreshToken = createRefreshToken(user._id);
+
+    // Update stored token
+    user.refreshTokens = user.refreshTokens.filter(
+      (t) => t.token !== validToken.token
+    );
+    user.refreshTokens.push({
+      token: await bcrypt.hash(newRefreshToken, 10),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+    await user.save();
+
+    // Set new cookie
+    res.cookie("refreshToken", newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+
+    res.status(200).json({
+      accessToken: newAccessToken,
+      accessTokenExpires: new Date(Date.now() + 3 * 60 * 60 * 1000),
+    });
+  } catch (error) {
+    return next(new ApiError("Invalid refresh token", 401));
   }
 });
 
 exports.protect = asyncHandler(async (req, res, next) => {
   //1) check if token is exists
-  let token;
+  let accessToken;
   if (
     req.headers.authorization &&
     req.headers.authorization.startsWith("Bearer")
   ) {
-    token = req.headers.authorization.split(" ")[1];
+    accessToken = req.headers.authorization.split(" ")[1];
   }
 
-  if (!token) {
+  if (!accessToken) {
     return next(new ApiError("Please login first to access this route", 401));
   }
 
   //2) verify token (not changed or expired)
-  const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+  const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
 
   //3) check if user exists
   const currentUser = await usersModel.findById(decoded.userId);
@@ -158,10 +307,10 @@ exports.protect = asyncHandler(async (req, res, next) => {
       10
     );
 
-    // password changed afte token created
+    // password changed after token created
     if (passwordChangedTimeStamp > decoded.iat) {
       return next(
-        new ApiError("user changed the password. Please login again", 401)
+        new ApiError("Password changed recently! Please login again", 401)
       );
     }
   }
@@ -183,7 +332,10 @@ exports.allowedTo = (...roles) =>
 
 exports.enabledControls = (...scope) =>
   asyncHandler(async (req, res, next) => {
-    if (req.user.role == "admin" && !req.user.enabledControls.includes(scope)) {
+    if (
+      req.user.role == roles.ADMIN &&
+      !req.user.enabledControls.includes(scope)
+    ) {
       return next(
         new ApiError(
           "You don't have the permission to access this. contact the support to enable it.",
@@ -193,6 +345,52 @@ exports.enabledControls = (...scope) =>
     }
     next();
   });
+
+exports.logout = asyncHandler(async (req, res, next) => {
+  // 1) Get refresh token from cookie
+  const refreshToken = req.cookies.refreshToken;
+  if (!refreshToken) {
+    return next(new ApiError("No active session to logout", 400));
+  }
+
+  // 2) Get user from DB
+  const user = await usersModel.findById(req.user._id);
+  if (!user) {
+    res.clearCookie("refreshToken");
+    return next(new ApiError("User not found", 404));
+  }
+
+  // 3) Find and remove the refresh token
+  const tokensBefore = user.refreshTokens.length;
+
+  // Compare hashed tokens
+  const tokenPromises = user.refreshTokens.map(async (tokenDoc) => ({
+    doc: tokenDoc,
+    match: await bcrypt.compare(refreshToken, tokenDoc.token),
+  }));
+
+  const tokenResults = await Promise.all(tokenPromises);
+  user.refreshTokens = tokenResults
+    .filter((result) => !result.match)
+    .map((result) => result.doc);
+
+  // 4) Save if tokens changed
+  if (user.refreshTokens.length < tokensBefore) {
+    await user.save();
+  }
+
+  // 5) Clear cookie
+  res.clearCookie("refreshToken", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "Strict",
+  });
+
+  res.status(200).json({
+    status: "success",
+    message: "Logged out successfully",
+  });
+});
 
 exports.forgetPassword = asyncHandler(async (req, res, next) => {
   //1) Get user by email
@@ -224,193 +422,11 @@ exports.forgetPassword = asyncHandler(async (req, res, next) => {
     user.name.split(" ")[0].charAt(0).toUpperCase() +
     user.name.split(" ")[0].slice(1).toLocaleLowerCase();
 
-    let img ="https://logowik.com/content/uploads/images/free-food-delivery8485.logowik.com.webp"
-
-
-  let emailTamplate = `<!DOCTYPE html>
-  <html lang="en-US">
-    <head>
-      <meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
-      <title>Reset Password Email</title>
-      <meta name="description" content="Reset Password Email" />
-      <style type="text/css">
-        a:hover {
-          text-decoration: underline !important;
-        }
-      </style>
-    </head>
-  
-    <body
-      marginheight="0"
-      topmargin="0"
-      marginwidth="0"
-      style="margin: 0px; background-color: #f2f3f8"
-      leftmargin="0"
-    >
-      <!--100% body table-->
-      <table
-        cellspacing="0"
-        border="0"
-        cellpadding="0"
-        width="100%"
-        bgcolor="#f2f3f8"
-        style="
-          @import url(https://fonts.googleapis.com/css?family=Rubik:300,400,500,700|Open+Sans:300,400,600,700);
-          font-family: 'Open Sans', sans-serif;
-        "
-      >
-        <tr>
-          <td>
-            <table
-              style="background-color: #f2f3f8; max-width: 670px; margin: 0 auto"
-              width="100%"
-              border="0"
-              align="center"
-              cellpadding="0"
-              cellspacing="0"
-            >
-              <tr>
-                <td style="height: 80px">&nbsp;</td>
-              </tr>
-              <tr>
-                <td style="text-align: center">
-                  <a href="" title="logo" target="_blank">
-                    <img
-                      width="250"
-                      src=${img}
-                      title="logo"
-                      alt="logo"
-                    />
-                  </a>
-                </td>
-              </tr>
-              <tr>
-                <td style="height: 20px">&nbsp;</td>
-              </tr>
-              <tr>
-                <td>
-                  <table
-                    width="95%"
-                    border="0"
-                    align="center"
-                    cellpadding="0"
-                    cellspacing="0"
-                    style="
-                      max-width: 670px;
-                      background: #fff;
-                      border-radius: 3px;
-                      text-align: center;
-                      -webkit-box-shadow: 0 6px 18px 0 rgba(0, 0, 0, 0.06);
-                      -moz-box-shadow: 0 6px 18px 0 rgba(0, 0, 0, 0.06);
-                      box-shadow: 0 6px 18px 0 rgba(0, 0, 0, 0.06);
-                    "
-                  >
-                    <tr>
-                      <td style="height: 40px">&nbsp;</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 0 35px">
-                        <h1
-                          style="
-                            color: #1e1e2d;
-                            font-weight: 500;
-                            margin: 0;
-                            font-size: 30px;
-                            font-family: 'Rubik', sans-serif;
-                          "
-                        >
-                          You have requested to reset your password
-                        </h1>
-                        <span
-                          style="
-                            display: inline-block;
-                            vertical-align: middle;
-                            margin: 29px 0 26px;
-                            border-bottom: 1px solid #cecece;
-                            width: 100px;
-                          "
-                        ></span>
-                        <p
-                          style="
-                            color: #455056;
-                            font-size: 17px;
-                            line-height: 24px;
-                            margin: 0;
-                          "
-                        >
-                          Hello ${capitalizeFirlstLetterOfName}, \n
-                          We received a request to reset the password on your Swift move account.
-                        </p>
-                        <p
-                          
-                          style="
-                            text-decoration: none !important;
-                            font-weight: 500;
-                            margin-top: 35px;
-                            color: black;
-                            text-transform: uppercase;
-                            font-size: 20px;
-                            padding: 10px 24px;
-                            display: inline-block;
-                            border-radius: 50px;
-                          "
-                          >${resetCode}</p
-                        >
-                        <p
-                          style="
-                            color: #455056;
-                            font-size: 17px;
-                            line-height: 24px;
-                            margin: 0;
-                          "
-                        >
-                          Enter this code to complete the reset password process. Please note that this code is only valid for 20 min.
-                          
-                          Thanks for helping us keep your account secure.
-                        </p>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="height: 40px">&nbsp;</td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-  
-              <tr>
-                <td style="height: 20px">&nbsp;</td>
-              </tr>
-              <tr>
-                <td style="text-align: center">
-                  <p
-                    style="
-                      font-size: 14px;
-                      color: rgba(69, 80, 86, 0.7411764705882353);
-                      line-height: 18px;
-                      margin: 0 0 0;
-                    "
-                  >
-                    &copy; <strong>https://</strong>
-                  </p>
-                </td>
-              </tr>
-              <tr>
-                <td style="height: 80px">&nbsp;</td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-      <!--/100% body table-->
-    </body>
-  </html>
-  `;
-
   try {
     await sendEmail({
       email: user.email,
       subject: `${capitalizeFirlstLetterOfName}, here is your reset code`,
-      message: emailTamplate,
+      message: forgetPasswordEmailHTML(capitalizeFirlstLetterOfName, resetCode),
     });
   } catch (error) {
     (user.passwordResetCode = undefined),
@@ -450,51 +466,91 @@ exports.verifyPasswordResetCode = asyncHandler(async (req, res, next) => {
 });
 
 exports.resetPassword = asyncHandler(async (req, res, next) => {
-  // get user based on email
+  // 1) Get user by email
   const user = await usersModel.findOne({ email: req.body.email });
   if (!user) {
     return next(
-      new ApiError(`There is no user with email ${req.body.email}`, 400)
+      new ApiError(`No user found with email ${req.body.email}`, 404)
     );
   }
 
-  // check if reset code is verified
+  // 2) Check if reset code was verified
   if (!user.passwordResetCodeVerified) {
     return next(new ApiError("Reset code not verified", 400));
   }
 
+  // 3) Update password and clear reset fields
   user.password = req.body.newPassword;
+  user.passwordChangedAT = Date.now();
   user.passwordResetCode = undefined;
   user.passwordResetCodeExpire = undefined;
   user.passwordResetCodeVerified = undefined;
 
+  // 4) Invalidate all previous refresh tokens
+  user.refreshTokens = [];
+
+  // 5) Generate new tokens
+  const accessToken = createAccessToken(user._id, user.role);
+  const refreshToken = createRefreshToken(user._id);
+
+  // 6) Store new refresh token
+  const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+  user.refreshTokens.push({
+    token: hashedRefreshToken,
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+  });
+
   await user.save();
 
-  // if everything is good => generate new token
-  const token = createToken(user._id, user.role);
-  res.status(200).json({ token });
+  // 7) Set refresh token in cookie
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "Strict",
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+  });
+
+  // 8) Send response
+  res.status(200).json({
+    status: "success",
+    accessToken,
+    accessTokenExpires: new Date(Date.now() + 3 * 60 * 60 * 1000), // 3 hours
+  });
 });
+
 //login by google
-exports.loginByGoogle =asyncHandler(async (req,res,next)=>{
-//get id token from req
-let {idToken}=req.body
-//check token from google
-let {email , name} = await verifyGoogle(idToken)
-//check user exist 
-let userExist = await usersModel.findOne({email})
-if(!userExist){
-  userExist = await usersModel.create({
-    email,
-    name,
-    provider:providers.GOOGLE,
-    account_status:accountStatus.CONFIRMED,
-    phone:undefined
-  })
-}
-//generate token 
-const accessToken = createToken(userExist._id, userExist.role);
-//send response 
-return res.status(200).json({message:"User Login Successfully",success:true ,
-  access_token:accessToken
-})
-} )
+exports.loginByGoogle = asyncHandler(async (req, res, next) => {
+  //get id token from req
+  let { idToken } = req.body;
+  //check token from google
+  let { email, name } = await verifyGoogle(idToken);
+  //check user exist
+  let userExist = await usersModel.findOne({ email });
+
+  if (userExist && userExist.provider !== providers.GOOGLE) {
+    return next(
+      new ApiError(
+        `Email already registered with ${userExist.provider}. Please use ${userExist.provider} login.`,
+        409
+      )
+    );
+  }
+
+  if (!userExist) {
+    userExist = await usersModel.create({
+      email,
+      name,
+      provider: providers.GOOGLE,
+      account_status: accountStatus.CONFIRMED,
+      phone: undefined,
+    });
+  }
+  //generate token
+  const accessToken = createToken(userExist._id, userExist.role);
+  //send response
+  return res.status(200).json({
+    message: "User Login Successfully",
+    success: true,
+    access_token: accessToken,
+  });
+});
