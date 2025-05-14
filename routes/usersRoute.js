@@ -1,8 +1,9 @@
 const express = require("express");
 const Router = express.Router();
 
+const { createUserValidator,updateUserValidator } = require("../Validation/userValidator");
+
 const {
-  uploadUserImage,
   //----- Admin Routes -----
   getUsers,
   getUser,
@@ -19,6 +20,7 @@ const {
   deleteLoggedUserData,
   //----- /User's Routes -----
 } = require("../controllers/usersController");
+const { cloudUpload } = require("../utils/Cloudinary/cloudUpload");
 
 const {
   protect,
@@ -33,19 +35,23 @@ Router.use(protect);
 
 Router.get("/getLoggedUser", getLoggedUser, getUser);
 Router.put("/updateLoggedUserPassword", updateLoggedUserPassword);
-Router.put("/updateLoggedUserData",uploadUserImage, updateLoggedUserData);
+Router.put(
+  "/updateLoggedUserData",
+  cloudUpload({}).single("image"),
+  updateLoggedUserData
+);
 Router.delete("/deleteLoggedUserData", deleteLoggedUserData);
 
 //----- /User Routes -----
-
+// ============================================================= //
 //----- Admin Routes -----
 
 Router.use(allowedTo("superAdmin", "admin"));
 Router.use(enabledControls("users"));
 
-Router.route("/").get(getUsers).post(createUser);
+Router.route("/").get(getUsers).post(createUserValidator, createUser);
 
-Router.route("/:id").get(getUser).delete(deleteUser).put(updateUser);
+Router.route("/:id").get(getUser).delete(deleteUser).put(updateUserValidator,updateUser);
 
 Router.put("/changePassword/:id", updateUserPassword);
 

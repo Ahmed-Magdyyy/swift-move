@@ -1,6 +1,5 @@
 const { check } = require("express-validator");
 const validatorMiddleware = require("../middlewares/validatorMiddleware");
-// const userModel = require("../../models/userModel");
 const { roles, providers } = require("../utils/Constant/enum");
 
 exports.signupValidator = [
@@ -48,20 +47,6 @@ exports.signupValidator = [
     .if((value, { req }) => req.body.provider === providers.SYSTEM)
     .notEmpty()
     .withMessage("Confirmation password is required"),
-
-//   check("image")
-//     .optional()
-//     .custom((value) => {
-//       if (!value.startsWith("data:image/")) {
-//         throw new Error("Invalid image format");
-//       }
-//       const maxSize = 5 * 1024 * 1024; // 5MB
-//       const buffer = Buffer.from(value.split(",")[1], "base64");
-//       if (buffer.length > maxSize) {
-//         throw new Error("Image exceeds 5MB limit");
-//       }
-//       return true;
-//     }),
 
   check("role")
     .optional()

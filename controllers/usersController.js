@@ -8,82 +8,6 @@ const usersModel = require("../models/userModel");
 const ApiError = require("../utils/ApiError");
 const createToken = require("../utils/createToken");
 
-function deleteUploadedFile(file) {
-  if (file) {
-    const filePath = `${file.path}`;
-    fs.unlink(filePath, (err) => {
-      if (err) {
-        console.error("Error deleting user image:", err);
-      } else {
-        console.log("User image deleted successfully:", filePath);
-      }
-    });
-  }
-}
-
-const multerStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/users");
-  },
-  filename: function (req, file, cb) {
-    const ext = file.mimetype.split("/")[1];
-    const filename = `user-${uuidv4()}.${ext}`;
-    cb(null, filename);
-  },
-});
-
-const multerfilter = function (req, file, cb) {
-  if (file.mimetype.startsWith("image")) {
-    cb(null, true);
-  } else {
-    cb(new ApiError("only Images allowed", 400), false);
-  }
-};
-
-const upload = multer({
-  storage: multerStorage,
-  fileFilter: multerfilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB
-  },
-}).single("image");
-
-exports.uploadUserImage = (req, res, next) => {
-  upload(req, res, function (err) {
-    if (err) {
-      if (err instanceof multer.MulterError) {
-        if (err.code === "LIMIT_FILE_SIZE") {
-          return next(new ApiError("File size exceeds 5MB limit", 400));
-        }
-        return next(new errorResponse(err.message, 400));
-      }
-
-      if (req.file) deleteUploadedFile(req.file); // Delete the uploaded file
-      return next(
-        new ApiError(`An error occurred while uploading the file. ${err}`, 500)
-      );
-    }
-
-    // Check if the uploaded file is not an image
-    if (req.file && !req.file.mimetype.startsWith("image")) {
-      // Delete the uploaded file
-      deleteUploadedFile(req.file);
-      return next(new ApiError("Only images are allowed", 400));
-    }
-
-    // Check if the uploaded file exceeds the size limit
-    if (req.file && req.file.size > 5 * 1024 * 1024) {
-      // Delete the uploaded file
-      deleteUploadedFile(req.file);
-      return next(new ApiError("Image file size exceeds 5 MB", 400));
-    }
-
-    // File uploaded successfully
-    if (req.file) req.body.image = req.file.filename; // Set the image filename to req.body.image
-    next();
-  });
-};
-
 //----- Admin Routes -----
 
 exports.getUsers = asyncHandler(async (req, res, next) => {
@@ -115,14 +39,6 @@ exports.getUsers = asyncHandler(async (req, res, next) => {
     .sort({ createdAt: -1 })
     .skip(skipNum)
     .limit(limitNum)
-    .lean(); // Use lean to return plain JavaScript objects
-
-  // users = users.map((user) => {
-  //   if (user.image) {
-  //     user.image = `${process.env.BASE_URL}/users/${user.image}`;
-  //   }
-  //   return user;
-  // });
 
   res
     .status(200)
@@ -158,14 +74,7 @@ exports.createUser = asyncHandler(async (req, res, next) => {
 });
 
 exports.updateUser = asyncHandler(async (req, res, next) => {
-  const {
-    name,
-    email,
-    phone,
-    role,
-    enabledControls,
-    active,
-  } = req.body;
+  const { name, email, phone, role, enabledControls, active } = req.body;
 
   const user = await usersModel.findById(req.params.id);
 
@@ -268,43 +177,73 @@ exports.updateLoggedUserPassword = asyncHandler(async (req, res, next) => {
 });
 
 exports.updateLoggedUserData = asyncHandler(async (req, res, next) => {
-  const user = await usersModel.findById(req.user._id);
+  let { name, email, phone } = req.body;
+  const userExist = await usersModel.findById(req.user._id);
 
-  if (!user) {
-    if (req.file) {
-      const path = req.file.path;
-      deleteUploadedFile({
-        fieldname: "image",
-        path,
+  if (name) {
+    userExist.name = name;
+  }
+  if (email) {
+    userExist.email = email;
+  }
+  if (phone) {
+    userExist.phone = phone;
+  }
+  let uploadedImage;
+  if (req.file) {
+    try {
+      uploadedImage = await cloudinary.uploader.upload(req.file?.path, {
+        public_id: userExist.image.public_id,
+        overwrite: true,
       });
+
+      userExist.image = {
+        secure_url: uploadedImage.secure_url,
+        public_id: uploadedImage.public_id,
+      };
+      req.failImage = {
+        secure_url: uploadedImage.secure_url,
+        public_id: uploadedImage.public_id,
+      };
+    } catch (uploadError) {
+      return next(new AppError("Image upload failed", 500));
     }
-    return next(new ApiError(`No user found for this id:${req.user._id}`, 404));
   }
 
-  if (user.image !== null && req.file) {
-    deleteUploadedFile({
-      fieldname: "image",
-      path: `uploads/users/${user.image}`,
-    });
-  }
+  const updatedUser = await userExist.save();
 
-  const updatedUser = await usersModel.findByIdAndUpdate(
-    req.user._id,
-    {
-      name: req.body.name,
-      email: req.body.email,
-      phone: req.body.phone,
-      image: req.file && req.file.filename,
-    },
-    { new: true }
-  );
+  if (!updatedUser) {
+    if (uploadedImage) {
+      uploadedImage = await cloudinary.uploader.destroy(
+        uploadedImage.public_id
+      );
+    }
+    return next(new ApiError("Fail To Update User Data", 500));
+  }
 
   res.status(200).json({ data: updatedUser });
 });
 
 exports.deleteLoggedUserData = asyncHandler(async (req, res, next) => {
-  await usersModel.findByIdAndUpdate(req.user._id, { active: false });
-  res.status(204).json({ message: "Success" });
+  const userExist = await usersModel.findById(req.user._id);
+  if (!userExist) {
+    return next(new ApiError(messages.user.notFound, 404));
+  }
+  //delete image
+  if (userExist.image?.public_id) {
+    try {
+      await cloudinary.uploader.destroy(userExist.image.public_id);
+    } catch (cloudinaryError) {
+      return next(new ApiError("Failed to delete image from Cloudinary", 500));
+    }
+  }
+  let userDeleted = await usersModel.findByIdAndUpdate(req.user._id, {
+    active: false,
+  });
+  if (!userDeleted) {
+    return next(new ApiError(messages.user.failToDelete, 500));
+  }
+  res.status(204).json({ message: "Success", userDeleted });
 });
 
 //----- /User Routes -----

@@ -7,6 +7,23 @@ const handelJwtInvalidSignature = () =>
 const handelJwtExpire = () =>
   new ApiError("Expired token, Please login again", 401);
 
+const handleDuplicateFieldsDB = (err) => {
+  const field = Object.keys(err.keyValue)[0];
+  const message = `${field} already exists. Please use another ${field}!`;
+  return new ApiError(message, 400);
+};
+
+const handleValidationErrorDB = (err) => {
+  const errors = Object.values(err.errors).map(el => el.message);
+  const message = `Invalid input data: ${errors.join('. ')}`;
+  return new ApiError(message, 400);
+};
+
+const handleCastErrorDB = (err) => {
+  const message = `Invalid ${err.path}: ${err.value}`;
+  return new ApiError(message, 400);
+};
+
 const sendErrorForDev = (err, res) => {
   console.log(err)
   return res.status(err.statusCode).json({
@@ -17,27 +34,46 @@ const sendErrorForDev = (err, res) => {
   });
 };
 
-const sendErrorForprod = (err, res) => {
-  return res.status(err.statusCode).json({
-    status: err.status,
-    message: err.message,
-    errors: err.errors || []
-  });
+const sendErrorForProd = (err, res) => {
+  if (err.isOperational) {
+    res.status(err.statusCode).json({
+      status: err.status,
+      message: err.message,
+      errors: err.errors || []
+    });
+  } else {
+    console.error('ERROR 💥', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Something went very wrong!'
+    });
+  }
 };
 
+
 const globalError =async (err, req, res, next) => {
-  // for cloudinary
+  // Cloudinary cleanup
   if( req.failImage?.public_id){
      await deleteImageCloud( req.failImage.public_id)
   }
+
   err.statusCode = err.statusCode || 500;
   err.status = err.status || "error";
+
+  let error = { ...err };
+  error.message = err.message;
+
+  if (error.code === 11000) error = handleDuplicateFieldsDB(error);
+  if (error.name === 'ValidationError') error = handleValidationErrorDB(error);
+  if (error.name === 'CastError') error = handleCastErrorDB(error);
+  if (error.name === 'JsonWebTokenError') error = handelJwtInvalidSignature();
+  if (error.name === 'TokenExpiredError') error = handelJwtExpire();
+
+  // Send response
   if (process.env.NODE_ENV === "development") {
-    sendErrorForDev(err, res);
+    sendErrorForDev(error, res);
   } else {
-    if (err.name === "JsonWebTokenError") err = handelJwtInvalidSignature();
-    if (err.name === "TokenExpiredError") err = handelJwtExpire();
-    sendErrorForprod(err, res);
+    sendErrorForProd(error, res);
   }
 };
 

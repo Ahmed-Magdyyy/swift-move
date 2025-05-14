@@ -25,9 +25,6 @@ const {
 } = require("../controllers/authController");
 const { cloudUpload } = require("../utils/Cloudinary/cloudUpload");
 
-// const userValidation = require("../Validation/user.validation");
-// const isValid = require("../middlewares/validatorMiddleware");
-
 const Router = express.Router();
 
 Router.post(
@@ -55,6 +52,6 @@ Router.post("/google-login", googleLoginValidator, loginByGoogle);
 
 Router.use(protect);
 
-Router.post("/logout", logout);
+Router.get("/logout", logout);
 
 module.exports = Router;

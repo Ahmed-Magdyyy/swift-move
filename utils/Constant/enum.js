@@ -13,13 +13,18 @@ const providers = {
   SYSTEM: "system",
   GOOGLE: "google",
 };
+const enabledControls = {
+  USERS: "users",
+};
 
 Object.freeze(roles);
 Object.freeze(accountStatus);
 Object.freeze(providers);
+Object.freeze(enabledControls);
 
 module.exports = {
   roles,
   accountStatus,
   providers,
+  enabledControls
 };

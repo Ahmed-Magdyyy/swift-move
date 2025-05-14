@@ -19,7 +19,7 @@ const userSchema = new mongoose.Schema(
     phone: {
       type: String,
       unique: [true, "Phone must be unique"],
-      required: true
+      required: true,
     },
     provider: {
       type: String,
@@ -68,36 +68,30 @@ const userSchema = new mongoose.Schema(
         // },
       },
     },
-    refreshTokens: [
-      {
-        _id: false,
-        token: { type: String },
-        expiresAt: { type: Date, index: true },
-        createdAt: { type: Date, default: Date.now },
-      },
-    ],
+    refreshTokens: {
+      type: [
+        {
+          token: String,
+          expiresAt: Date,
+          createdAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
   },
   {
     timestamps: {
       timeZone: "UTC",
     },
     toJSON: {
-      virtuals: true,
       transform: (doc, ret) => {
-        delete ret.id;
         delete ret.__v;
-        // ret.refreshTokens = ret.refreshTokens.map(token => ({
-        //   expiresAt: token.expiresAt,
-        //   createdAt: token.createdAt
-        // }));
-
         if (ret.role !== roles.ADMIN) {
           delete ret.enabledControls;
         }
         return ret;
       },
     },
-    toObject: { virtuals: true },
   }
 );
 
@@ -113,10 +107,15 @@ userSchema.pre("save", async function (next) {
 });
 
 // Add expiration cleanup middleware
-userSchema.post('find', function(docs) {
-  docs.forEach(doc => {
+userSchema.post("find", function (docs) {
+  if (!docs) return; // Handle undefined/null case
+  docs.forEach((doc) => {
+    // Initialize refreshTokens if missing
+    if (!doc.refreshTokens) doc.refreshTokens = [];
+
+    // Filter expired tokens
     doc.refreshTokens = doc.refreshTokens.filter(
-      token => token.expiresAt > new Date()
+      (token) => token.expiresAt > new Date()
     );
   });
 });

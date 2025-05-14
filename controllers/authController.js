@@ -1,11 +1,12 @@
 const crypto = require("crypto");
 const asyncHandler = require("express-async-handler");
-const ApiError = require("../utils/ApiError");
-
-const usersModel = require("../models/userModel");
+const bcrypt = require("bcrypt");
 
 const jwt = require("jsonwebtoken");
-const bcrypt = require("bcrypt");
+
+const ApiError = require("../utils/ApiError");
+const usersModel = require("../models/userModel");
+const blackListModel = require("../models/blackListModel")
 const sendEmail = require("../utils/Email/sendEmails");
 const {
   createAccessToken,
@@ -41,13 +42,9 @@ exports.signup = asyncHandler(async (req, res, next) => {
       secure_url = uploadResult.secure_url;
       public_id = uploadResult.public_id;
     } catch (err) {
-      return next(new ApiError("Image upload failed", 500));
+      return next(new ApiError("Image upload failed", 500, err));
     }
   }
-
-console.log('====================================');
-console.log(req.file);
-console.log('====================================');
 
   try {
     // Create a new user
@@ -57,7 +54,7 @@ console.log('====================================');
       phone,
       password,
       role,
-      image: { secure_url, public_id },
+      image: req.file ? { secure_url, public_id } : {},
       account_status: "pending",
     });
 
@@ -86,12 +83,12 @@ console.log('====================================');
     res.status(201).json({
       message: "User created. Please check your email for confirmation.",
       data: user,
-      confirmationToken
+      confirmationToken,
     });
   } catch (error) {
     await cloudinary.uploader.destroy(public_id);
     req.failImage = { secure_url, public_id };
-    return next(new ApiError("Registration failed", 500));
+    return next(new ApiError("Registration failed", 500, error));
   }
 });
 
@@ -104,7 +101,7 @@ exports.confirmEmail = asyncHandler(async (req, res, next) => {
 
     // Check expiration
     if (Date.now() >= decoded.exp * 1000) {
-      return next(new ApiError("Confirmation link has expired", 401));
+      return next(new ApiError("Confirmation link expired", 401));
     }
 
     const user = await usersModel.findById(decoded.userId);
@@ -117,28 +114,9 @@ exports.confirmEmail = asyncHandler(async (req, res, next) => {
     // Update user status
     user.account_status = "confirmed";
 
-    // Generate tokens
-    const accessToken = createAccessToken(user._id, user.role);
-    const refreshToken = createRefreshToken(user._id);
-
-    // Store hashed refresh token to DB
-    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
-    user.refreshTokens.push({
-      token: hashedRefreshToken,
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-    });
-
     await user.save();
 
-    // Set refresh token in cookie
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Strict",
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-    });
-
-    res.status(200).send("Account confirmed successfully");
+    res.status(200).send("Account confirmed successfully. You can login now");
   } catch (error) {
     return next(new ApiError("Invalid confirmation token", 401));
   }
@@ -167,7 +145,9 @@ exports.resendConfirmationEmail = asyncHandler(async (req, res, next) => {
     html: confirmEmailHtml(capitalizeFirlstLetterOfName, confirmationToken),
   });
 
-  res.status(200).json({ message: "Confirmation email resent", confirmationToken});
+  res
+    .status(200)
+    .json({ message: "Confirmation email resent", confirmationToken });
 });
 
 exports.login = asyncHandler(async (req, res, next) => {
@@ -218,6 +198,7 @@ exports.login = asyncHandler(async (req, res, next) => {
       email: user.email,
       phone: user.phone,
       role: user.role,
+      ...(user.role === roles.ADMIN && { enabledControls: user.enabledControls }),
       provider: user.provider,
       image: user.image, // Only include necessary fields
     },
@@ -277,46 +258,37 @@ exports.refreshToken = asyncHandler(async (req, res, next) => {
 });
 
 exports.protect = asyncHandler(async (req, res, next) => {
-  //1) check if token is exists
+  // 1) Check for access token
   let accessToken;
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith("Bearer")
-  ) {
+  if (req.headers.authorization?.startsWith("Bearer")) {
     accessToken = req.headers.authorization.split(" ")[1];
   }
 
   if (!accessToken) {
-    return next(new ApiError("Please login first to access this route", 401));
+    return next(new ApiError("Please login first", 401));
   }
 
-  //2) verify token (not changed or expired)
-  const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+  // 2) Verify token
+  const decoded = jwt.verify(accessToken, process.env.JWT_ACCESS_SECRET);
 
-  //3) check if user exists
+  // 3) Check blacklist
+  const blacklisted = await blackListModel.exists({ token: accessToken });
+  if (blacklisted) {
+    return next(new ApiError("Token revoked, please login again", 401));
+  }
+
+  // 4) Check user exists
   const currentUser = await usersModel.findById(decoded.userId);
-
   if (!currentUser) {
-    next(new ApiError("user no longer exists for this token", 401));
+    return next(new ApiError("User no longer exists", 401));
   }
 
-  //4) check if user changed his password after token is created
-  if (currentUser.passwordChangedAT) {
-    const passwordChangedTimeStamp = parseInt(
-      currentUser.passwordChangedAT.getTime() / 1000,
-      10
-    );
-
-    // password changed after token created
-    if (passwordChangedTimeStamp > decoded.iat) {
-      return next(
-        new ApiError("Password changed recently! Please login again", 401)
-      );
-    }
+  // 5) Check password change
+  if (currentUser.passwordChangedAT?.getTime() > decoded.iat * 1000) {
+    return next(new ApiError("Password changed recently!", 401));
   }
 
   req.user = currentUser;
-
   next();
 });
 
@@ -338,7 +310,7 @@ exports.enabledControls = (...scope) =>
     ) {
       return next(
         new ApiError(
-          "You don't have the permission to access this. contact the support to enable it.",
+          "You don't have the permission to access this. contact support to enable it.",
           403
         )
       );
@@ -353,33 +325,40 @@ exports.logout = asyncHandler(async (req, res, next) => {
     return next(new ApiError("No active session to logout", 400));
   }
 
-  // 2) Get user from DB
+  // 2) Get access token from headers
+  const accessToken = req.headers.authorization?.split(" ")[1];
+
+  // 3) Get user from DB
   const user = await usersModel.findById(req.user._id);
   if (!user) {
     res.clearCookie("refreshToken");
     return next(new ApiError("User not found", 404));
   }
 
-  // 3) Find and remove the refresh token
+  // 4) Remove refresh token
   const tokensBefore = user.refreshTokens.length;
-
-  // Compare hashed tokens
-  const tokenPromises = user.refreshTokens.map(async (tokenDoc) => ({
-    doc: tokenDoc,
-    match: await bcrypt.compare(refreshToken, tokenDoc.token),
-  }));
-
-  const tokenResults = await Promise.all(tokenPromises);
-  user.refreshTokens = tokenResults
-    .filter((result) => !result.match)
-    .map((result) => result.doc);
-
-  // 4) Save if tokens changed
+  user.refreshTokens = user.refreshTokens.filter(
+    tokenDoc => !bcrypt.compareSync(refreshToken, tokenDoc.token)
+  );
+  
   if (user.refreshTokens.length < tokensBefore) {
     await user.save();
   }
 
-  // 5) Clear cookie
+  // 5) Blacklist access token
+  if (accessToken) {
+    try {
+      const decoded = jwt.decode(accessToken);
+      await blackListModel.create({
+        token: accessToken,
+        expiresAt: new Date(decoded.exp * 1000)
+      });
+    } catch (error) {
+      return next(new ApiError("Error blacklisting token", 400, error))
+    }
+  }
+
+  // 6) Clear cookie
   res.clearCookie("refreshToken", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
