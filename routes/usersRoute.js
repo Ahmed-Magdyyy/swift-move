@@ -1,7 +1,13 @@
 const express = require("express");
 const Router = express.Router();
 
-const { createUserValidator,updateUserValidator } = require("../Validation/userValidator");
+const {
+  createUserValidator,
+  updateUserValidator,
+  updateUserPasswordValidator,
+  updateLoggedInUserPassword,
+  updateLoggedInUserData
+} = require("../Validation/userValidator");
 
 const {
   //----- Admin Routes -----
@@ -34,10 +40,15 @@ const {
 Router.use(protect);
 
 Router.get("/getLoggedUser", getLoggedUser, getUser);
-Router.put("/updateLoggedUserPassword", updateLoggedUserPassword);
+Router.put(
+  "/updateLoggedUserPassword",
+  updateLoggedInUserPassword,
+  updateLoggedUserPassword
+);
 Router.put(
   "/updateLoggedUserData",
   cloudUpload({}).single("image"),
+  updateLoggedInUserData,
   updateLoggedUserData
 );
 Router.delete("/deleteLoggedUserData", deleteLoggedUserData);
@@ -51,9 +62,16 @@ Router.use(enabledControls("users"));
 
 Router.route("/").get(getUsers).post(createUserValidator, createUser);
 
-Router.route("/:id").get(getUser).delete(deleteUser).put(updateUserValidator,updateUser);
+Router.route("/:id")
+  .get(getUser)
+  .delete(deleteUser)
+  .put(updateUserValidator, updateUser);
 
-Router.put("/changePassword/:id", updateUserPassword);
+Router.put(
+  "/changePassword/:id",
+  updateUserPasswordValidator,
+  updateUserPassword
+);
 
 //----- /Admin Routes -----
 

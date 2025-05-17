@@ -27,24 +27,22 @@ exports.createUserValidator = [
     ),
 
   check("password")
-    .if((value, { req }) => req.body.provider === providers.SYSTEM)
     .notEmpty()
     .withMessage("Password is required")
     .isLength({ min: 6 })
     .withMessage("Password must be at least 6 characters")
     .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{6,}$/)
-    .withMessage("Password must contain uppercase, lowercase, and number")
-    .custom((value, { req }) => {
-      if (value !== req.body.cPassword) {
-        throw new Error("Password confirmation does not match");
+    .withMessage("Password must contain uppercase, lowercase, and number"),
+
+  check("cPassword")
+    .notEmpty()
+    .withMessage("Confirmation password is required")
+    .custom((vlaue, { req }) => {
+      if (vlaue !== req.body.password) {
+        throw new Error("Confirmation password does not match password");
       }
       return true;
     }),
-
-  check("cPassword")
-    .if((value, { req }) => req.body.provider === providers.SYSTEM)
-    .notEmpty()
-    .withMessage("Confirmation password is required"),
 
   check("role")
     .optional()
@@ -111,6 +109,70 @@ exports.updateUserValidator = [
     .withMessage("active field is required")
     .isBoolean()
     .withMessage("active field but be Boolean"),
+
+  validatorMiddleware,
+];
+
+exports.updateUserPasswordValidator = [
+  check("password")
+    .notEmpty()
+    .withMessage("Password is required")
+    .isLength({ min: 6 })
+    .withMessage("Password must be at least 6 characters")
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{6,}$/)
+    .withMessage("Password must contain uppercase, lowercase, and number"),
+
+  check("cPassword")
+    .notEmpty()
+    .withMessage("Confirmation password is required")
+    .custom((vlaue, { req }) => {
+      if (vlaue !== req.body.password) {
+        throw new Error("Confirmation password does not match password");
+      }
+      return true;
+    }),
+
+  validatorMiddleware,
+];
+
+exports.updateLoggedInUserPassword = [
+  check("newPassword")
+    .notEmpty()
+    .withMessage("new Password is required")
+    .isLength({ min: 6 })
+    .withMessage("Password must be at least 6 characters")
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{6,}$/)
+    .withMessage("Password must contain uppercase, lowercase, and number"),
+
+  check("cNewPassword")
+    .notEmpty()
+    .withMessage("Confirmation password is required")
+    .custom((vlaue, { req }) => {
+      if (vlaue !== req.body.newPassword) {
+        throw new Error("Confirmation password does not match password");
+      }
+      return true;
+    }),
+
+  validatorMiddleware,
+];
+
+exports.updateLoggedInUserData = [
+  check("name")
+    .notEmpty()
+    .withMessage("Name is required")
+    .isLength({ min: 3 })
+    .withMessage("Name must be at least 3 characters"),
+  check("email")
+    .notEmpty()
+    .withMessage("Email is required")
+    .isEmail()
+    .withMessage("Invalid email address"),
+  check("phone")
+    .notEmpty()
+    .withMessage("Phone is required")
+    .matches(/^(\+201|01)[0-2,5]{1}[0-9]{8}$/)
+    .withMessage("Invalid Egyptian phone number"),
 
   validatorMiddleware,
 ];

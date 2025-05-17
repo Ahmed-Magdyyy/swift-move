@@ -285,7 +285,7 @@ exports.protect = asyncHandler(async (req, res, next) => {
 
   // 5) Check password change
   if (currentUser.passwordChangedAT?.getTime() > decoded.iat * 1000) {
-    return next(new ApiError("Password changed recently!", 401));
+    return next(new ApiError("Password changed recently! Please login again using the new password.", 401));
   }
 
   req.user = currentUser;
