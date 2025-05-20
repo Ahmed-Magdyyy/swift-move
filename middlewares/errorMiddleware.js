@@ -25,7 +25,6 @@ const handleCastErrorDB = (err) => {
 };
 
 const sendErrorForDev = (err, res) => {
-  console.log(err)
   return res.status(err.statusCode).json({
     status: err.status,
     error: err.errors || [],
@@ -56,10 +55,10 @@ const globalError =async (err, req, res, next) => {
   if( req.failImage?.public_id){
      await deleteImageCloud( req.failImage.public_id)
   }
-
+  // console.log("errrrrrrrrr 2222", err.stack)
+  // err.stack=err.stack
   err.statusCode = err.statusCode || 500;
   err.status = err.status || "error";
-
   let error = { ...err };
   error.message = err.message;
 
@@ -71,9 +70,9 @@ const globalError =async (err, req, res, next) => {
 
   // Send response
   if (process.env.NODE_ENV === "development") {
-    sendErrorForDev(error, res);
+    sendErrorForDev(err, res);
   } else {
-    sendErrorForProd(error, res);
+    sendErrorForProd(err, res);
   }
 };
 

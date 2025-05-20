@@ -17,14 +17,23 @@ const enabledControls = {
   USERS: "users",
 };
 
+const vehicleType = {
+  BIKE: "bike",
+  CAR: "car",
+  VAN: "van",
+  TRUCK: "truck",
+};
+
 Object.freeze(roles);
 Object.freeze(accountStatus);
 Object.freeze(providers);
 Object.freeze(enabledControls);
+Object.freeze(vehicleType);
 
 module.exports = {
   roles,
   accountStatus,
   providers,
-  enabledControls
+  enabledControls,
+  vehicleType
 };
