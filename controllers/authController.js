@@ -209,7 +209,7 @@ exports.login = asyncHandler(async (req, res, next) => {
 
 exports.refreshToken = asyncHandler(async (req, res, next) => {
   const refreshToken = req.cookies.refreshToken;
-  if (!refreshToken) return next(new ApiError("Unauthorized", 401));
+  if (!refreshToken) return next(new ApiError("Unauthorized, No refresh token found!", 401));
 
   try {
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
