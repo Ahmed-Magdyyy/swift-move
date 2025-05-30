@@ -22,8 +22,11 @@ app.use(helmet())
 // Routes
 const mountRoutes = require("./routes");
 
-
-// middlewares
+// Middlewares
+app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "uploads")));
+app.use(cookieParser());
 
 // Configure allowed origins
 const allowedOrigins = [
@@ -39,13 +42,6 @@ app.use(cors({
     // Allow requests with no origin (server-to-server, mobile apps)
     if (!origin) return callback(null, true);
     
-    const allowedOrigins = [
-      'http://localhost:5173',
-      'https://on-demand-services-rose.vercel.app',
-      'https://swift-move.onrender.com',
-      'http://localhost:3000'
-    ];
-    
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
@@ -54,17 +50,12 @@ app.use(cors({
   },
   credentials: true, // MUST BE TRUE
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Set-Cookie'] // Expose Set-Cookie header to browser
 }));
 
 // Handle preflight requests
 app.options('*', cors()); 
-
-app.use(express.urlencoded({ extended: false }));
-
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "uploads")));
-app.use(cookieParser());
 
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
