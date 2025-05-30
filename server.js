@@ -69,10 +69,10 @@ dbConnection();
 mountRoutes(app)
 
 app.get('/', (req, res) => {
-  console.log("req.cookies", reqزcookies)
+  console.log("req.cookies", req.cookies)
   console.log("req.cookies", req)
 
-  res.send('ٍSwift move API is running.');
+  res.send('Swift move API is running.');
 });
 
 app.all("*", (req, res, next) => {
