@@ -28,8 +28,8 @@ const mountRoutes = require("./routes");
 // Configure allowed origins
 const allowedOrigins = [
   'http://localhost:5173', // Frontend dev's localhost
-  'https://your-render-app.onrender.com', // Your Render URL
-  'http://localhost:3000' // Your local frontend (if any)
+  'https://swift-move.onrender.com', //Render URL
+  'http://localhost:3000' // My local host
 ];
 
 // Enable CORS with dynamic origin checking
