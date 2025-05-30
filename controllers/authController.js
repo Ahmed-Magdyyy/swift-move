@@ -210,6 +210,8 @@ res.cookie("refreshToken", refreshToken, {
 
 exports.refreshToken = asyncHandler(async (req, res, next) => {
   const refreshToken = req.cookies.refreshToken;
+
+  console.log("req.cookies", req.cookies)
   if (!refreshToken) return next(new ApiError("Unauthorized, No refresh token found!", 401));
 
   try {
