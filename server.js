@@ -25,7 +25,34 @@ const mountRoutes = require("./routes");
 
 // middlewares
 
-app.use(cors());
+// Configure allowed origins
+const allowedOrigins = [
+  'http://localhost:5173', // Frontend dev's localhost
+  'https://your-render-app.onrender.com', // Your Render URL
+  'http://localhost:3000' // Your local frontend (if any)
+];
+
+// Enable CORS with dynamic origin checking
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      const msg = `The CORS policy for this site does not allow access from ${origin}`;
+      return callback(new Error(msg), false);
+    }
+  },
+  credentials: true, // Enable if using cookies/authentication
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Handle preflight requests
+app.options('*', cors()); 
+
 app.use(express.urlencoded({ extended: false }));
 
 app.use(express.json());
