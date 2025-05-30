@@ -28,7 +28,7 @@ const mountRoutes = require("./routes");
 // Configure allowed origins
 const allowedOrigins = [
   'http://localhost:5173', // Frontend dev's localhost
-  'https://on-demand-services-rose.vercel.app/', // Frontend prod's host
+  'https://on-demand-services-rose.vercel.app', // Frontend prod's host
   'https://swift-move.onrender.com', //Render URL
   'http://localhost:3000' // My local host
 ];
@@ -36,18 +36,23 @@ const allowedOrigins = [
 // Enable CORS with dynamic origin checking
 app.use(cors({
   origin: function (origin, callback) {
-    console.log("originnnn", origin)
-    // Allow requests with no origin (mobile apps, curl, etc)
-    if (!origin) return callback(null, true);
+    console.log("Received origin:", origin);
     
+    // Allow requests with no origin (mobile apps, server-side requests, etc)
+    if (!origin) {
+      console.warn("Allowing request with missing origin");
+      return callback(null, true);
+    }
+
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     } else {
-      const msg = `The CORS policy for this site does not allow access from ${origin}`;
+      console.error(`Blocked origin: ${origin}`);
+      const msg = `CORS policy: ${origin} not allowed`;
       return callback(new Error(msg), false);
     }
   },
-  credentials: true, // Enable if using cookies/authentication
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
