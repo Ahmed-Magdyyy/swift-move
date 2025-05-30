@@ -28,6 +28,7 @@ const mountRoutes = require("./routes");
 // Configure allowed origins
 const allowedOrigins = [
   'http://localhost:5173', // Frontend dev's localhost
+  'https://on-demand-services-rose.vercel.app/', // Frontend prod's host
   'https://swift-move.onrender.com', //Render URL
   'http://localhost:3000' // My local host
 ];
