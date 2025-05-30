@@ -36,23 +36,23 @@ const allowedOrigins = [
 // Enable CORS with dynamic origin checking
 app.use(cors({
   origin: function (origin, callback) {
-    console.log("Received origin:", origin);
+    // Allow requests with no origin (server-to-server, mobile apps)
+    if (!origin) return callback(null, true);
     
-    // Allow requests with no origin (mobile apps, server-side requests, etc)
-    if (!origin) {
-      console.warn("Allowing request with missing origin");
-      return callback(null, true);
-    }
-
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'https://on-demand-services-rose.vercel.app',
+      'https://swift-move.onrender.com',
+      'http://localhost:3000'
+    ];
+    
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
-    } else {
-      console.error(`Blocked origin: ${origin}`);
-      const msg = `CORS policy: ${origin} not allowed`;
-      return callback(new Error(msg), false);
     }
+    
+    return callback(new Error(`CORS blocked: ${origin} not allowed`), false);
   },
-  credentials: true,
+  credentials: true, // MUST BE TRUE
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
