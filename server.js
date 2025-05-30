@@ -69,9 +69,6 @@ dbConnection();
 mountRoutes(app)
 
 app.get('/', (req, res) => {
-  console.log("req.cookies", req.cookies)
-  console.log("req.cookies", req)
-
   res.send('Swift move API is running.');
 });
 
