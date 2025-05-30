@@ -10,13 +10,13 @@ const cookieParser = require("cookie-parser");
 const ApiError = require("./utils/ApiError");
 const globalError = require("./middlewares/errorMiddleware");
 const dbConnection = require("./config/database");
-const { limiter } = require("./utils/Rate-Limiter/rate-limiter");
+// const { limiter } = require("./utils/Rate-Limiter/rate-limiter");
 const { default: helmet } = require("helmet");
 
 const socketConfig = require("./socketConfig");
 
 //rate limit 
-app.use(limiter)
+// app.use(limiter)
 //helmet
 app.use(helmet())
 // Routes
