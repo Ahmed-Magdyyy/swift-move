@@ -36,6 +36,7 @@ const allowedOrigins = [
 // Enable CORS with dynamic origin checking
 app.use(cors({
   origin: function (origin, callback) {
+    console.log("originnnn", origin)
     // Allow requests with no origin (mobile apps, curl, etc)
     if (!origin) return callback(null, true);
     
