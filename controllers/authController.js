@@ -184,12 +184,13 @@ exports.login = asyncHandler(async (req, res, next) => {
   await user.save();
 
   // Set refresh token cookie
-  res.cookie("refreshToken", refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "Strict",
-    maxAge: 30 * 24 * 60 * 60 * 1000,
-  });
+res.cookie("refreshToken", refreshToken, {
+  httpOnly: true,
+  secure: req.headers.origin?.startsWith('https://') || false,
+  sameSite: req.headers.origin?.startsWith('https://') ? 'None' : 'Lax',
+  maxAge: 30 * 24 * 60 * 60 * 1000,
+  path: "/",
+});
 
   res.status(200).json({
     data: {
@@ -241,12 +242,13 @@ exports.refreshToken = asyncHandler(async (req, res, next) => {
     await user.save();
 
     // Set new cookie
-    res.cookie("refreshToken", newRefreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Strict",
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
+res.cookie("refreshToken", newRefreshToken, {
+  httpOnly: true,
+  secure: req.headers.origin?.startsWith('https://') || false,
+  sameSite: req.headers.origin?.startsWith('https://') ? 'None' : 'Lax',
+  maxAge: 30 * 24 * 60 * 60 * 1000,
+  path: "/",
+});
 
     res.status(200).json({
       accessToken: newAccessToken,
