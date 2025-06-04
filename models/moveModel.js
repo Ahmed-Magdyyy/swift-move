@@ -3,12 +3,12 @@ const mongoose = require('mongoose');
 const moveSchema = new mongoose.Schema({
     customer: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
+        ref: 'user',
         required: true
     },
     driver: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
+        ref: 'user'
     },
     status: {
         type: String,

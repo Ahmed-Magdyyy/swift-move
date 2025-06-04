@@ -22,9 +22,9 @@ router.use(protect)
 router.post(
     '/onboarding',
     cloudUpload({}).fields([
-        { name: 'license', maxCount: 1 },
-        { name: 'insurance', maxCount: 1 },
-        { name: 'vehicleRegistration', maxCount: 1 }
+        { name: 'id', maxCount: 1 },
+        { name: 'carDrivingLicense', maxCount: 1 },
+        { name: 'personalDrivingLicense', maxCount: 1 }
     ]),
     allowedTo('driver'),
     submitOnboarding
@@ -42,9 +42,9 @@ router.put(
     '/profile',
     allowedTo('driver'),
     cloudUpload({}).fields([
-        { name: 'license', maxCount: 1 },
-        { name: 'insurance', maxCount: 1 },
-        { name: 'vehicleRegistration', maxCount: 1 }
+        { name: 'id', maxCount: 1 },
+        { name: 'carDrivingLicense', maxCount: 1 },
+        { name: 'personalDrivingLicense', maxCount: 1 }
     ]),
     updateDriverProfile
 );
