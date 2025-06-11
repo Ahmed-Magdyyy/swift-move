@@ -21,13 +21,9 @@ class PricingService {
             }
         };
 
-        this.insuranceRates = {
-            basic: 0.05, // 5% of total value
-            premium: 0.1  // 10% of total value
-        };
     }
 
-    async calculateMovePrice(pickup, delivery, vehicleType, items = [], insurance = { isSelected: false, type: 'basic' }) {
+    async calculateMovePrice(pickup, delivery, vehicleType) {
         try {
             // Get route details from Google Maps
             const route = await googleMapsService.calculateRoute(
@@ -41,20 +37,12 @@ class PricingService {
             const basePrice = vehicleRate.basePrice;
             const distancePrice = distanceInKm * vehicleRate.perKmRate;
 
-            // Calculate insurance price if selected
-            let insurancePrice = 0;
-            if (insurance.isSelected) {
-                const totalItemValue = items.reduce((sum, item) => sum + (item.value || 0), 0);
-                insurancePrice = totalItemValue * this.insuranceRates[insurance.type];
-            }
-
             // Calculate total price
-            const totalPrice = basePrice + distancePrice + insurancePrice;
+            const totalPrice = basePrice + distancePrice;
 
             return {
                 basePrice,
                 distancePrice,
-                insurancePrice,
                 totalPrice,
                 distance: route.distance,
                 duration: route.duration,
@@ -74,6 +62,7 @@ class PricingService {
             driverEarnings: totalPrice - commission
         };
     }
+
 }
 
 module.exports = new PricingService(); 

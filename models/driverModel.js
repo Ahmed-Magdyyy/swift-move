@@ -19,7 +19,7 @@ const driverSchema = new mongoose.Schema({
     },
     isAvailable: {
         type: Boolean,
-        default: true
+        default: false
     },
     currentLocation: {
         type: {
@@ -35,12 +35,43 @@ const driverSchema = new mongoose.Schema({
     rating: {
         average: {
             type: Number,
-            default: 0
+            default: 0,
+            min: 0,
+            max: 5
         },
         count: {
             type: Number,
             default: 0
-        }
+        },
+        reviews: [
+            {
+                customerId: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: 'user',
+                    required: true
+                },
+                moveId: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: 'Move',
+                    required: true
+                },
+                rating: {
+                    type: Number,
+                    required: true,
+                    min: 1,
+                    max: 5,
+                    validate: {
+                        validator: Number.isInteger,
+                        message: 'Rating must be an integer between 1 and 5'
+                    }
+                },
+                comment: String,
+                createdAt: {
+                    type: Date,
+                    default: Date.now
+                }
+            }
+        ]
     },
     documents: {
         id: {
@@ -58,9 +89,10 @@ const driverSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['accepted', 'rejected', 'suspended'],
+        enum: ['pending', 'accepted', 'rejected', 'suspended'],
+        default: 'pending'
     },
-    history:[String]
+    history: [String]
 }, {
     timestamps: true
 });

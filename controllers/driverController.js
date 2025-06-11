@@ -3,7 +3,8 @@ const ApiError = require('../utils/ApiError');
 const Driver = require('../models/driverModel');
 const User = require('../models/userModel');
 const { cloudinary } = require('../utils/Cloudinary/cloud');
-const sendEmail = require('../utils/Email/sendEmails');
+const Move = require('../models/moveModel');
+const { roles } = require('../utils/Constant/enum');
 
 // @desc    Get driver profile
 // @route   GET /api/v1/drivers/profile
@@ -11,7 +12,7 @@ const sendEmail = require('../utils/Email/sendEmails');
 exports.getDriverProfile = asyncHandler(async (req, res, next) => {
     const driver = await Driver.findOne({ user: req.user._id })
         .populate('user', 'name email phone');
-    
+
     if (!driver) {
         return next(new ApiError('Driver profile not found', 404));
     }
@@ -28,7 +29,12 @@ exports.getDriverProfile = asyncHandler(async (req, res, next) => {
 exports.updateDriverProfile = asyncHandler(async (req, res, next) => {
     const { vehicleType, vehicleDetails } = req.body;
     
-    // Handle document uploads if provided
+    const driver = await Driver.findOne({ user: req.user._id });
+
+    if (!driver) {
+        return next(new ApiError('Driver profile not found', 404));
+    }
+
     let documents = [];
     if (req.files) {
         const uploadPromises = Object.keys(req.files).map(async (docType) => {
@@ -42,11 +48,11 @@ exports.updateDriverProfile = asyncHandler(async (req, res, next) => {
                 publicId: result.public_id
             };
         });
-        
+
         documents = await Promise.all(uploadPromises);
     }
 
-    const driver = await Driver.findOneAndUpdate(
+    const updatedDriver = await Driver.findOneAndUpdate(
         { user: req.user._id },
         {
             vehicleType,
@@ -58,7 +64,7 @@ exports.updateDriverProfile = asyncHandler(async (req, res, next) => {
 
     res.status(200).json({
         status: 'success',
-        data: driver
+        data: updatedDriver
     });
 });
 
@@ -67,7 +73,7 @@ exports.updateDriverProfile = asyncHandler(async (req, res, next) => {
 // @access  Private (Driver only)
 exports.updateLocation = asyncHandler(async (req, res, next) => {
     const { coordinates } = req.body;
-    
+
     const driver = await Driver.findOneAndUpdate(
         { user: req.user._id },
         {
@@ -89,78 +95,23 @@ exports.updateLocation = asyncHandler(async (req, res, next) => {
 // @route   PUT /api/v1/drivers/availability
 // @access  Private (Driver only)
 exports.updateAvailability = asyncHandler(async (req, res, next) => {
-    const { isAvailable } = req.body;
-    
-    const driver = await Driver.findOneAndUpdate(
-        { user: req.user._id },
-        { isAvailable },
-        { new: true }
-    );
+    const driver = await Driver.findOne({ user: req.user._id });
+
+    if (!driver) {
+        return next(new ApiError('Driver not found', 404));
+    }
+
+    if (driver.status !== "accepted") {
+        return next(new ApiError('Can not update availability. Driver is not accepted', 400));
+    }
+
+    // Toggle the availability status
+    driver.isAvailable = !driver.isAvailable;
+    await driver.save();
 
     res.status(200).json({
         status: 'success',
         data: driver
-    });
-});
-
-// @desc    Get driver earnings
-// @route   GET /api/v1/drivers/earnings
-// @access  Private (Driver only)
-exports.getEarnings = asyncHandler(async (req, res, next) => {
-    const driver = await Driver.findOne({ user: req.user._id })
-        .populate({
-            path: 'completedMoves',
-            select: 'price status completedAt'
-        });
-
-    const earnings = {
-        total: driver.completedMoves.reduce((sum, move) => sum + move.price, 0),
-        moves: driver.completedMoves
-    };
-
-    res.status(200).json({
-        status: 'success',
-        data: earnings
-    });
-});
-
-// @desc    Get nearby drivers
-// @route   GET /api/v1/drivers/nearby
-// @access  Private (Admin only)
-exports.getNearbyDrivers = asyncHandler(async (req, res, next) => {
-    const { longitude, latitude, maxDistance = 5000 } = req.query;
-
-    const drivers = await Driver.find({
-        isAvailable: true,
-        currentLocation: {
-            $near: {
-                $geometry: {
-                    type: 'Point',
-                    coordinates: [parseFloat(longitude), parseFloat(latitude)]
-                },
-                $maxDistance: parseInt(maxDistance)
-            }
-        }
-    })
-    .populate('user', 'name phone')
-    .select('currentLocation vehicleType rating');
-
-    res.status(200).json({
-        status: 'success',
-        data: drivers
-    });
-});
-
-// @desc    Get all drivers (Admin only)
-// @route   GET /api/v1/drivers
-// @access  Private (Admin only)
-exports.getAllDrivers = asyncHandler(async (req, res, next) => {
-    const drivers = await Driver.find({ role: 'driver' });
-    
-    res.status(200).json({
-        status: 'success',
-        results: drivers.length,
-        data: drivers
     });
 });
 
@@ -169,8 +120,7 @@ exports.getAllDrivers = asyncHandler(async (req, res, next) => {
 // @access  Private (Driver only)
 exports.submitOnboarding = asyncHandler(async (req, res, next) => {
     const { vehicle } = req.body;
-    
-    // Check if user exists and is not already a driver
+
     const user = await User.findById(req.user._id);
     if (!user) {
         return next(new ApiError('User not found', 404));
@@ -196,7 +146,7 @@ exports.submitOnboarding = asyncHandler(async (req, res, next) => {
                 publicId: result.public_id
             };
         });
-        
+
         const uploadedDocs = await Promise.all(uploadPromises);
         uploadedDocs.forEach(doc => {
             documents[doc.type] = {
@@ -206,34 +156,18 @@ exports.submitOnboarding = asyncHandler(async (req, res, next) => {
         });
     }
 
-    // Create driver profile with pending status
     const driver = await Driver.create({
         user: req.user._id,
         vehicle,
         documents,
         isAvailable: false,
-        history:["Driver submitted onboarding request"]
+        status: "pending",
+        history: ["Driver submitted onboarding request"]
     });
 
-    // // Notify admins about new driver request
-    // const admins = await User.find({ role: { $in: ['admin', 'superAdmin'] } });
-    // const adminEmails = admins.map(admin => admin.email);
-
-    // await sendEmail({
-    //     email: adminEmails,
-    //     subject: 'New Driver Onboarding Request',
-    //     html: `
-    //         <h1>New Driver Onboarding Request</h1>
-    //         <p>A new driver has submitted their onboarding request:</p>
-    //         <ul>
-    //             <li>Name: ${user.name}</li>
-    //             <li>Email: ${user.email}</li>
-    //             <li>Phone: ${user.phone}</li>
-    //             <li>Vehicle: ${vehicle.type} ${vehicle.model}</li>
-    //         </ul>
-    //         <p>Please review their documents and approve/reject their request.</p>
-    //     `
-    // });
+    if (req.user.role === roles.CUSTOMER) {
+        await User.updateOne({ _id: req.user._id }, { role: roles.DRIVER }, { new: true });
+    }
 
     res.status(201).json({
         status: 'success',
@@ -242,29 +176,54 @@ exports.submitOnboarding = asyncHandler(async (req, res, next) => {
     });
 });
 
-// @desc    Get driver onboarding status
-// @route   GET /api/v1/drivers/onboarding/status
-// @access  Private (Driver only)
-exports.getOnboardingStatus = asyncHandler(async (req, res, next) => {
-    try {
-        const driver = await Driver.findOne({ user: req.user._id });
-    
-    if (!driver) {
-        return next(new ApiError("No driver onboarding request found", 404))
-    }
 
-    res.status(200).json({
-        status: 'success',
-        data: {
-            hasSubmitted: true,
-            status: driver.status,
-            // profile: driver
+
+// @desc    Get all drivers (Admin only)
+// @route   GET /api/v1/drivers
+// @access  Private (Admin only)
+exports.getAllDrivers = asyncHandler(async (req, res, next) => {
+
+    let filter = {};
+    const { page, limit, ...query } = req.query;
+
+    Object.keys(query).forEach((key) => {
+        if (typeof query[key] === "string") {
+            filter[key] = { $regex: query[key], $options: "i" };
+        } else {
+            filter[key] = query[key];
         }
     });
-    } catch (error) {
-        return next(new ApiError("Fail to find driver onboarding request", 500))
-        
+
+    const totalDriversCount = await Driver.countDocuments(filter);
+
+    let drivers;
+    // Pagination logic
+    const pageNum = page * 1 || 1;
+    const limitNum = limit * 1 || 5;
+    const skipNum = (pageNum - 1) * limitNum;
+    const totalPages = Math.ceil(totalDriversCount / limitNum);
+
+    drivers = await Driver
+        .find(filter)
+        .populate('user', 'name email phone')
+        .sort({ createdAt: -1 })
+        .skip(skipNum)
+        .limit(limitNum)
+
+    res
+        .status(200)
+        .json({ totalPages, page: pageNum, results: drivers.length, data: drivers });
+});
+
+// @desc    Get driver (Admin only)
+// @route   GET /api/v1/drivers/:id
+// @access  Private (Admin only)
+exports.getDriver = asyncHandler(async (req, res, next) => {
+    const driver = await Driver.findById(req.params.id).populate('user');
+    if (!driver) {
+        return next(new ApiError('Driver not found', 404));
     }
+    res.status(200).json({ data: driver });
 });
 
 // @desc    Update driver status (Admin only)
@@ -273,16 +232,20 @@ exports.getOnboardingStatus = asyncHandler(async (req, res, next) => {
 exports.updateDriverStatus = asyncHandler(async (req, res, next) => {
 
     const { status, reason } = req.body;
-    
+
     const driver = await Driver.findById(req.params.id).populate('user');
     if (!driver) {
         return next(new ApiError('Driver not found', 404));
     }
 
+    if ( driver.status === status) {
+        return next(new ApiError(`Driver status is already ${status}`, 400));
+    }
+
     driver.status = status;
-    if(status === "accepted" || status === "rejected"){
-        driver.history.push(`Account status changed to ${status}. ${status ==="accepted"? "Admins verified the driver profile and approved your request" : `Admins rejected your request due to ${reason}`}`);
-    } else if(status === "suspended"){
+    if (status === "accepted" || status === "rejected") {
+        driver.history.push(`Account status changed to ${status}. ${status === "accepted" ? "Admins verified the driver profile and approved your request" : `Admins rejected your request due to ${reason}`}`);
+    } else if (status === "suspended") {
         driver.history.push(`Account status changed to ${status}. Due to ${reason}`);
     }
 
@@ -294,42 +257,100 @@ exports.updateDriverStatus = asyncHandler(async (req, res, next) => {
     });
 });
 
-// @desc    Get all pending driver requests (Admin only)
-// @route   GET /api/v1/drivers/pending
-// @access  Private (Admin only)
-exports.getPendingDrivers = asyncHandler(async (req, res, next) => {
-    const drivers = await Driver.find({ account_status: 'pending' })
-        .populate('user', 'name email phone');
-    
-    res.status(200).json({
-        status: 'success',
-        results: drivers.length,
-        data: drivers
-    });
-});
-
 // @desc    Delete driver account (Admin only)
 // @route   DELETE /api/v1/drivers/:id
 // @access  Private (Admin only)
 exports.deleteDriver = asyncHandler(async (req, res, next) => {
     const driver = await Driver.findById(req.params.id);
-    
+
     if (!driver) {
         return next(new ApiError('Driver not found', 404));
     }
 
     // Delete driver's documents from Cloudinary
     if (driver.documents && driver.documents.length > 0) {
-        const deletePromises = driver.documents.map(doc => 
+        const deletePromises = driver.documents.map(doc =>
             cloudinary.uploader.destroy(doc.publicId)
         );
         await Promise.all(deletePromises);
     }
 
-    await driver.remove();
+    await driver.deleteOne();
 
     res.status(204).json({
         status: 'success',
         data: null
     });
 }); 
+
+
+
+// @desc    Rate driver (Customer only)
+// @route   POST /api/v1/drivers/:id/rate
+// @access  Private (Customer only)
+exports.rateDriver = asyncHandler(async (req, res, next) => {
+    const { id: driverId } = req.params;
+    const { rate, comment, moveId } = req.body; // 'rating' for value, 'comment' for text
+    const customerId = req.user._id;
+
+    if (!rate || typeof rate !== 'number' || rate < 1 || rate > 5 || !Number.isInteger(rate)) {
+        return next(new ApiError('Rating must be an integer between 1 and 5.', 400));
+    }
+    if (!moveId) {
+        return next(new ApiError('Move ID is required to rate a driver.', 400));
+    }
+
+    const move = await Move.findById(moveId);
+    if (!move) {
+        return next(new ApiError('Move not found.', 404));
+    }
+    if (move.status !== 'delivered') {
+        return next(new ApiError('Cannot rate driver for a move that is not yet delivered.', 400));
+    }
+    if (move.customer.toString() !== customerId.toString()) {
+        return next(new ApiError('You are not authorized to rate the driver for this move.', 403));
+    }
+    if (!move.driver || move.driver.toString() !== driverId) {
+        return next(new ApiError('This driver was not assigned to the specified move.', 400));
+    }
+
+    const driver = await Driver.findById(driverId);
+    if (!driver) {
+        return next(new ApiError('Driver not found.', 404));
+    }
+
+    const existingReview = driver.rating.reviews.find(
+        r => r.moveId && r.moveId.toString() === moveId.toString() && r.customerId.toString() === customerId.toString()
+    );
+
+    if (existingReview) {
+        return next(new ApiError('You have already rated this driver for this move.', 400));
+    }
+
+    driver.rating.reviews.push({
+        customerId: customerId,
+        moveId: moveId,
+        rating: rate,
+        comment: comment || '',
+    });
+
+    driver.rating.count = driver.rating.reviews.length;
+    if (driver.rating.count > 0) {
+        const totalRatingSum = driver.rating.reviews.reduce((acc, curr) => acc + curr.rating, 0);
+        driver.rating.average = parseFloat((totalRatingSum / driver.rating.count).toFixed(1));
+    } else {
+        driver.rating.average = 0;
+    }
+
+    await driver.save();
+
+    res.status(200).json({
+        status: 'success',
+        message: 'Driver rated successfully.',  
+        data: {
+            averageRating: driver.rating.average,
+            ratingCount: driver.rating.count,
+            newReview: driver.rating.reviews[driver.rating.reviews.length -1]
+        }
+    });
+});

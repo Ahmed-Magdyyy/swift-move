@@ -107,18 +107,6 @@ const moveSchema = new mongoose.Schema({
         method: String,
         transactionId: String
     },
-    rating: {
-        score: {
-            type: Number,
-            min: 1,
-            max: 5
-        },
-        comment: String
-    },
-    estimatedTime: {
-        pickup: Number, // in minutes
-        delivery: Number // in minutes
-    },
     actualTime: {
         pickup: Date,
         delivery: Date
@@ -136,6 +124,20 @@ moveSchema.index({ status: 1, customer: 1 });
 moveSchema.index({ status: 1, driver: 1 });
 moveSchema.index({ scheduledFor: 1 });
 
+// Ensure actualTime is defined before trying to set sub-properties
+moveSchema.pre('save', function(next) {
+    if (this.isNew && !this.actualTime) {
+        this.actualTime = {}; // Initialize if not present
+    }
+    if (this.status === 'picked_up' && !this.actualTime.pickup) {
+        this.actualTime.pickup = new Date();
+    }
+    if (this.status === 'delivered' && !this.actualTime.delivery) {
+        this.actualTime.delivery = new Date();
+    }
+    next();
+});
+
 const Move = mongoose.model('Move', moveSchema);
 
-module.exports = Move; 
+module.exports = Move;

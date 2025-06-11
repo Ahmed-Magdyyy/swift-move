@@ -5,20 +5,19 @@ const {
     updateDriverProfile,
     updateLocation,
     updateAvailability,
-    getEarnings,
-    getNearbyDrivers,
     submitOnboarding,
-    getOnboardingStatus,
     updateDriverStatus,
-    getPendingDrivers,
-    // confirmDriverProfile
+    getAllDrivers,
+    getDriver,
+    deleteDriver,
+    rateDriver
 } = require('../controllers/driverController');
-const { protect, allowedTo } = require('../controllers/authController');
+const { protect, allowedTo, enabledControls } = require('../controllers/authController');
 const { cloudUpload } = require('../utils/Cloudinary/cloudUpload');
 
 router.use(protect)
 
-// Driver onboarding routes
+// Driver routes
 router.post(
     '/onboarding',
     cloudUpload({}).fields([
@@ -29,27 +28,30 @@ router.post(
     allowedTo('driver'),
     submitOnboarding
 );
-router.get('/onboarding/status', allowedTo('driver'), getOnboardingStatus);
+router.route('/profile')
+    .get(allowedTo('driver'), getDriverProfile)
+    .put(
+        allowedTo('driver', 'customer'),
+        cloudUpload({}).fields([
+            { name: 'id', maxCount: 1 },
+            { name: 'carDrivingLicense', maxCount: 1 },
+            { name: 'personalDrivingLicense', maxCount: 1 }
+        ]),
+        updateDriverProfile
+    );
 
-// Admin routes for driver management
-router.get('/pending', allowedTo('admin', 'superAdmin'), getPendingDrivers);
-router.put('/:id/status', allowedTo('admin', 'superAdmin'), updateDriverStatus);
-router.get('/nearby', allowedTo('driver'), getNearbyDrivers);
-
-// Driver routes (only accessible after approval)
-router.get('/profile', allowedTo('driver'), getDriverProfile);
-router.put(
-    '/profile',
-    allowedTo('driver'),
-    cloudUpload({}).fields([
-        { name: 'id', maxCount: 1 },
-        { name: 'carDrivingLicense', maxCount: 1 },
-        { name: 'personalDrivingLicense', maxCount: 1 }
-    ]),
-    updateDriverProfile
-);
+router.put('/ToggleAvailability', allowedTo('driver'), updateAvailability);
 router.put('/location', allowedTo('driver'), updateLocation);
-router.put('/availability', allowedTo('driver'), updateAvailability);
-router.get('/earnings', allowedTo('driver'), getEarnings);
+
+
+// Admin routes
+router.get('/', allowedTo('admin', 'superAdmin'), enabledControls('driver'), getAllDrivers);
+router.get('/:id', allowedTo('admin', 'superAdmin'), enabledControls('driver'), getDriver);
+router.put('/:id/status', allowedTo('admin', 'superAdmin'), enabledControls('driver'), updateDriverStatus);
+router.delete('/:id', allowedTo('admin', 'superAdmin'), enabledControls('driver'), deleteDriver);
+
+
+// Customer routes
+router.post('/:id/rate', allowedTo('customer'), rateDriver);
 
 module.exports = router; 

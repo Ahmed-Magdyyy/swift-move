@@ -153,58 +153,69 @@ exports.resendConfirmationEmail = asyncHandler(async (req, res, next) => {
 exports.login = asyncHandler(async (req, res, next) => {
   const { email, password } = req.body;
 
-  const user = await usersModel.findOne({ email }).select("+password");
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return next(new ApiError("Incorrect email or password", 401));
+  try {
+
+    const user = await usersModel.findOne({ email }).select("+password");
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return next(new ApiError("Incorrect email or password", 401));
+    }
+
+    if (user.account_status !== "confirmed") {
+      return next(new ApiError("Please confirm your email first", 401));
+    }
+
+    if (!user.active) {
+      return next(
+        new ApiError(
+          "Account has been deactivated. Contact customer support",
+          401
+        )
+      );
+    }
+
+    // Generate tokens
+    const accessToken = createAccessToken(user._id, user.role);
+    const refreshToken = createRefreshToken(user._id);
+
+    // Store hashed refresh token
+    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+    user.refreshTokens.push({
+      token: hashedRefreshToken,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+    await user.save();
+
+    // Set refresh token cookie
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+
+    res.status(200).json({
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        ...(user.role === roles.ADMIN && { enabledControls: user.enabledControls }),
+        provider: user.provider,
+        image: user.image, // Only include necessary fields
+      },
+      accessToken,
+      accessTokenExpires: new Date(Date.now() + 3 * 60 * 60 * 1000),
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Login failed",
+      error: error.message,
+    });
   }
 
-  if (user.account_status !== "confirmed") {
-    return next(new ApiError("Please confirm your email first", 401));
-  }
-
-  if (!user.active) {
-    return next(
-      new ApiError(
-        "Account has been deactivated. Contact customer support",
-        401
-      )
-    );
-  }
-
-  // Generate tokens
-  const accessToken = createAccessToken(user._id, user.role);
-  const refreshToken = createRefreshToken(user._id);
-
-  // Store hashed refresh token
-  const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
-  user.refreshTokens.push({
-    token: hashedRefreshToken,
-    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-  });
-  await user.save();
-
-  // Set refresh token cookie
-  res.cookie("refreshToken", refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "Strict",
-    maxAge: 30 * 24 * 60 * 60 * 1000,
-  });
-
-  res.status(200).json({
-    data: {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      ...(user.role === roles.ADMIN && { enabledControls: user.enabledControls }),
-      provider: user.provider,
-      image: user.image, // Only include necessary fields
-    },
-    accessToken,
-    accessTokenExpires: new Date(Date.now() + 3 * 60 * 60 * 1000),
-  });
 });
 
 exports.refreshToken = asyncHandler(async (req, res, next) => {
@@ -295,12 +306,6 @@ exports.protect = asyncHandler(async (req, res, next) => {
 exports.allowedTo = (...roles) =>
   asyncHandler(async (req, res, next) => {
 
-    console.log('====================================');
-    console.log("req.user",req.user);
-    console.log("roles",roles);
-    console.log("req.user.role",req.user.role);
-    console.log("roles.includes(req.user.role)",roles.includes(req.user.role));
-    console.log('====================================');
     if (!roles.includes(req.user.role)) {
       return next(
         new ApiError("you are not allowed to access this route", 403)
@@ -347,7 +352,7 @@ exports.logout = asyncHandler(async (req, res, next) => {
   user.refreshTokens = user.refreshTokens.filter(
     tokenDoc => !bcrypt.compareSync(refreshToken, tokenDoc.token)
   );
-  
+
   if (user.refreshTokens.length < tokensBefore) {
     await user.save();
   }
