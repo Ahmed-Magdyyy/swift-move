@@ -44,7 +44,7 @@ app.use(cors({
     
     return callback(new Error(`CORS blocked: ${origin} not allowed`), false);
   },
-  credentials: true, // MUST BE TRUE
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   exposedHeaders: ['Set-Cookie'] // Expose Set-Cookie header to browser
