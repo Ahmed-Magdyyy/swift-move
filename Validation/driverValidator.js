@@ -65,8 +65,8 @@ exports.validateUpdateStatus = [
     check("status")
         .notEmpty()
         .withMessage("Status is required")
-        .isIn(Object.values(driverStatus))
-        .withMessage(`Status must be one of: ${Object.values(driverStatus).join(", ")}`),
+        .isIn(['pending', 'accepted', 'rejected', 'suspended'])
+        .withMessage("Status must be one of: pending, accepted, rejected, suspended"),
     check("reason")
         .if(body("status").isIn(["rejected", "suspended"]))
         .notEmpty()
