@@ -199,7 +199,7 @@ exports.getAllDrivers = asyncHandler(async (req, res, next) => {
     let drivers;
     // Pagination logic
     const pageNum = page * 1 || 1;
-    const limitNum = limit * 1 || 5;
+    const limitNum = limit * 1 || 10;
     const skipNum = (pageNum - 1) * limitNum;
     const totalPages = Math.ceil(totalDriversCount / limitNum);
 

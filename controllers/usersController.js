@@ -30,7 +30,7 @@ exports.getUsers = asyncHandler(async (req, res, next) => {
   let users;
   // Pagination logic
   const pageNum = page * 1 || 1;
-  const limitNum = limit * 1 || 5;
+  const limitNum = limit * 1 || 10;
   const skipNum = (pageNum - 1) * limitNum;
   const totalPages = Math.ceil(totalUsersCount / limitNum);
 

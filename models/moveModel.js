@@ -52,19 +52,15 @@ const moveSchema = new mongoose.Schema({
         instructions: String
     },
     items: [{
-        title: {
+        name: {
             type: String,
-            required: true
+            required: [true, 'Item name is required.']
         },
-        description: String,
-        dimensions: {
-            length: Number,
-            width: Number,
-            height: Number
-        },
-        weight: Number,
-        photos: [String],
-        specialHandling: String
+        quantity: {
+            type: Number,
+            required: [true, 'Item quantity is required.'],
+            min: [1, 'Quantity must be at least 1.']
+        }
     }],
     vehicleType: {
         type: String,

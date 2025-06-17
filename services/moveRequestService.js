@@ -241,6 +241,78 @@ class MoveRequestService {
                (currentStatus === moveStatus.PENDING && [moveStatus.CANCELLED_BY_CUSTOMER, moveStatus.NO_DRIVERS_AVAILABLE, moveStatus.ACCEPTED].includes(newStatus));
     }
 
+    async getMoveDetails(moveId, userId, userRole) {
+        if (!moveId) {
+            throw new ApiError('Move ID is required.', 400);
+        }
+
+        // 1. Fetch the move and populate customer/driver user details
+        const move = await Move.findById(moveId)
+            .populate('customer', 'name email phone role')
+            .populate('driver', 'name email phone role') // This populates the user doc for the driver
+            .lean();
+
+        if (!move) {
+            throw new ApiError('Move not found.', 404);
+        }
+
+        // 2. Authorization check
+        const isCustomer = move.customer && move.customer._id.toString() === userId.toString();
+        const isDriver = move.driver && move.driver._id.toString() === userId.toString();
+        const isAdmin = userRole === userRoles.ADMIN;
+
+        if (!isCustomer && !isDriver && !isAdmin) {
+            throw new ApiError('Not authorized to view this move.', 403);
+        }
+
+        // 3. If a driver is assigned, fetch their specific driver details (like vehicle)
+        if (move.driver) {
+            const driverDetails = await Driver.findOne({ user: move.driver._id })
+                .select('vehicle rating.average') // Select specific fields from the Driver model
+                .lean();
+            
+            // 4. Combine the driver-specific details into the move object
+            if (driverDetails) {
+                // To avoid overwriting the whole driver object, we attach details to it
+                move.driver.vehicle = driverDetails.vehicle;
+                move.driver.averageRating = driverDetails.rating.average;
+            }
+        }
+
+        return move;
+    }
+
+    async getMovesForDriver(driverUserId) {
+        if (!driverUserId) {
+            throw new ApiError('Driver ID is required.', 400);
+        }
+        try {
+            // Note: The driver on the Move model is a reference to the 'user' document.
+            const moves = await Move.find({ driver: driverUserId })
+                .sort({ createdAt: -1 })
+                .lean();
+            return moves;
+        } catch (error) {
+            console.error(`Error fetching moves for driver ${driverUserId}:`, error);
+            throw new ApiError('Failed to retrieve driver moves.', 500);
+        }
+    }
+
+    async getMovesForCustomer(customerId) {
+        if (!customerId) {
+            throw new ApiError('Customer ID is required.', 400);
+        }
+        try {
+            const moves = await Move.find({ customer: customerId })
+                .sort({ createdAt: -1 })
+                .lean();
+            return moves;
+        } catch (error) {
+            console.error(`Error fetching moves for customer ${customerId}:`, error);
+            throw new ApiError('Failed to retrieve customer moves.', 500);
+        }
+    }
+
     async _finalizeMoveCompletion(move, existingSession) {
         const driver = await Driver.findOne({ user: move.driver }).session(existingSession); // Use findOne with user ref
         if (driver) {

@@ -142,7 +142,7 @@ exports.resendConfirmationEmail = asyncHandler(async (req, res, next) => {
   await sendEmail({
     email: user.email,
     subject: `${capitalizeFirlstLetterOfName}, Please confirm your account`,
-    html: confirmEmailHtml(capitalizeFirlstLetterOfName, confirmationToken),
+    message: confirmEmailHtml(capitalizeFirlstLetterOfName, confirmationToken),
   });
 
   res

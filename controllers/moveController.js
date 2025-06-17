@@ -1,175 +1,189 @@
-// controllers/moveController.js
 const asyncHandler = require('express-async-handler');
-// Service Imports
 const pricingService = require('../services/pricingService');
 const moveRequestService = require('../services/moveRequestService');
-const Move = require('../models/moveModel'); // Temporarily for getCustomerMoves, getDriverMoves, getMoveDetails - ideally refactor to service
 const ApiError = require('../utils/ApiError');
 
-/**
- * @desc    Get price estimate for a move
- * @route   POST /api/moves/estimate
- * @access  Private (Customer)
- */
-const getPriceEstimate = asyncHandler(async (req, res) => {
-    const { pickup, delivery, vehicleType, items } = req.body;
+// @desc    Get price estimate for a move
+// @route   POST /api/moves/estimate
+// @access  Private (Customer)
+const getPriceEstimate = asyncHandler(async (req, res, next) => {
+    const { pickup, delivery, vehicleType } = req.body;
 
-    // Insurance is no longer part of pricing
-    const estimate = await pricingService.calculateMovePrice(
-        pickup,
-        delivery,
-        vehicleType,
-        items
-    );
-    res.json(estimate);
+    try {
+        const estimate = await pricingService.calculateMovePrice(
+            pickup,
+            delivery,
+            vehicleType
+        );
+        res.status(200).json({
+            status: 'success',
+            data: estimate
+        });
+    } catch (error) {
+        return next(new ApiError(error.message, error.statusCode || 500, error));
+    }
 });
 
-/**
- * @desc    Create a new move request
- * @route   POST /api/moves
- * @access  Private (Customer)
- */
-const createMoveRequest = asyncHandler(async (req, res) => {
+// @desc    Create a new move request
+// @route   POST /api/moves
+// @access  Private (Customer)
+const createMoveRequest = asyncHandler(async (req, res, next) => {
     const {
         pickup,
         delivery,
         items,
         vehicleType,
         scheduledFor,
-        notes, // Optional: any customer notes
     } = req.body;
     const customerId = req.user._id;
 
-    const move = await moveRequestService.initiateNewMove({
-        customerId,
-        pickup,
-        delivery,
-        items,
-        vehicleType,
-        scheduledFor,
-        notes,
-    });
+    try {
+        const result = await moveRequestService.initiateNewMove(customerId,{
+            pickup,
+            delivery,
+            items,
+            vehicleType,
+            scheduledFor,
+        });
 
-    res.status(201).json(move);
-});
-
-/**
- * @desc    Get all moves for a customer
- * @route   GET /api/moves/customer
- * @access  Private (Customer)
- */
-const getCustomerMoves = asyncHandler(async (req, res) => {
-    // TODO: Consider moving this logic to moveRequestService for consistency
-    const moves = await Move.find({ customer: req.user._id })
-        .sort({ createdAt: -1 })
-        .lean(); // Use .lean() for faster queries if not modifying
-    res.json(moves);
-});
-
-/**
- * @desc    Get all moves for a driver (e.g., assigned or completed)
- * @route   GET /api/moves/driver
- * @access  Private (Driver)
- */
-const getDriverMoves = asyncHandler(async (req, res) => {
-    // TODO: Consider moving this logic to moveRequestService for consistency
-    // This might need more complex logic based on move status (e.g., 'accepted', 'in_transit', 'delivered' by this driver)
-    const moves = await Move.find({ driver: req.user._id })
-        .sort({ createdAt: -1 })
-        .lean();
-    res.json(moves);
-});
-
-/**
- * @desc    Get move by ID
- * @route   GET /api/moves/:moveId
- * @access  Private (Customer or assigned Driver or Admin)
- */
-const getMoveDetails = asyncHandler(async (req, res) => {
-    const { moveId } = req.params;
-    const userId = req.user._id;
-    const userRole = req.user.role;
-
-    // TODO: Move authorization logic into the service or a dedicated authorization middleware/service
-    const move = await Move.findById(moveId)
-        .populate('customer', 'name email phone') // Adjust fields as needed
-        .populate('driver', 'name email phone vehicleDetails') // Adjust fields as needed
-        .lean();
-
-    if (!move) {
-        throw new ApiError(404, 'Move not found');
+        res.status(201).json({
+            status: 'success',
+            message: 'Move request created successfully. Searching for drivers.',
+            data: result.move // Return the created move document
+        });
+    } catch (error) {
+        return next(new ApiError(error.message, error.statusCode || 500));
     }
+});
 
-    const isCustomer = move.customer._id.toString() === userId.toString();
-    const isDriver = move.driver && move.driver._id.toString() === userId.toString();
-    const isAdmin = userRole === 'admin';
-
-    if (!isCustomer && !isDriver && !isAdmin) {
-        throw new ApiError(403, 'Not authorized to view this move');
+// @desc    Get all moves for a customer
+// @route   GET /api/moves/customer
+// @access  Private (Customer)
+const getCustomerMoves = asyncHandler(async (req, res, next) => {
+    const customerId = req.user._id;
+    try {
+        const moves = await moveRequestService.getMovesForCustomer(customerId);
+        res.status(200).json({
+            status: 'success',
+            count: moves.length,
+            data: moves
+        });
+    } catch (error) {
+        return next(new ApiError(error.message, error.statusCode || 500));
     }
-
-    res.json(move);
 });
 
-/**
- * @desc    Driver accepts a move request
- * @route   POST /api/moves/:moveId/accept
- * @access  Private (Driver)
- */
-const driverAcceptMove = asyncHandler(async (req, res) => {
-    const { moveId } = req.params;
-    const driverId = req.user._id; // Assuming driver's ID is in req.user
-
-    const result = await moveRequestService.acceptMoveRequest(moveId, driverId);
-    res.json(result);
-});
-
-/**
- * @desc    Driver rejects a move request
- * @route   POST /api/moves/:moveId/reject
- * @access  Private (Driver)
- */
-const driverRejectMove = asyncHandler(async (req, res) => {
-    const { moveId } = req.params;
+// @desc    Get all moves for a driver (e.g., assigned or completed)
+// @route   GET /api/moves/driver
+// @access  Private (Driver)
+const getDriverMoves = asyncHandler(async (req, res, next) => {
     const driverId = req.user._id;
+    try {
+        const moves = await moveRequestService.getMovesForDriver(driverId);
+        res.status(200).json({
+            status: 'success',
+            count: moves.length,
+            data: moves
+        });
+    } catch (error) {
+        return next(new ApiError(error.message, error.statusCode || 500));
+    }
+});
+
+// @desc    Get move by ID
+// @route   GET /api/moves/:moveId
+// @access  Private (Customer or assigned Driver or Admin)
+const getMoveDetails = asyncHandler(async (req, res, next) => {
+    const { id: moveId } = req.params;
+    const { _id: userId, role: userRole } = req.user;
+
+    try {
+        const moveDetails = await moveRequestService.getMoveDetails(moveId, userId, userRole);
+        res.status(200).json({
+            status: 'success',
+            data: moveDetails
+        });
+    } catch (error) {
+        return next(new ApiError(error.message, error.statusCode || 500));
+    }
+});
+
+// @desc    Driver accepts a move request
+// @route   POST /api/moves/:moveId/accept
+// @access  Private (Driver)
+const driverAcceptMove = asyncHandler(async (req, res, next) => {
+    const { id: moveId } = req.params;
+    const driverUserId = req.user._id;
+
+    try {
+        const result = await moveRequestService.acceptMoveRequest(moveId, driverUserId);
+        res.status(200).json({
+            status: 'success',
+            message: 'Move accepted successfully.',
+            data: result.move // The service returns the updated move document
+        });
+    } catch (error) {
+        return next(new ApiError(error.message, error.statusCode || 500));
+    }
+});
+
+// @desc    Driver rejects a move request
+// @route   POST /api/moves/:moveId/reject
+// @access  Private (Driver)
+const driverRejectMove = asyncHandler(async (req, res, next) => {
+    const { id: moveId } = req.params;
+    const driverUserId = req.user._id;
     const { reason } = req.body; // Optional reason for rejection
 
-    const result = await moveRequestService.handleDriverRejection(moveId, driverId, reason);
-    res.json(result);
-});
-
-/**
- * @desc    Update move progress (status by driver)
- * @route   PUT /api/moves/:moveId/progress
- * @access  Private (Driver)
- */
-const updateMoveProgress = asyncHandler(async (req, res) => {
-    const { moveId } = req.params;
-    const driverId = req.user._id;
-    const { status, location } = req.body; // `location` might be current driver location for verification
-
-    if (!status) {
-        throw new ApiError(400, 'Status is required');
+    try {
+        await moveRequestService.handleDriverRejection(moveId, driverUserId, reason);
+        res.status(200).json({
+            status: 'success',
+            message: 'Move rejection has been processed.'
+        });
+    } catch (error) {
+        return next(new ApiError(error.message, error.statusCode || 500));
     }
-
-    const updatedMove = await moveRequestService.updateMoveProgress(moveId, driverId, status, location);
-    res.json(updatedMove);
 });
 
+// @desc    Update move progress (status by driver)
+// @route   PUT /api/moves/:moveId/progress
+// @access  Private (Driver)
+const updateMoveProgress = asyncHandler(async (req, res, next) => {
+    const { id: moveId } = req.params;
+    const { _id: driverUserId } = req.user;
+    const { status, ...updateData } = req.body; // e.g., location, notes
 
-/**
- * @desc    Cancel a move
- * @route   POST /api/moves/:moveId/cancel
- * @access  Private (Customer, or Driver under certain conditions, or Admin)
- */
-const cancelMove = asyncHandler(async (req, res) => {
-    const { moveId } = req.params;
-    const userId = req.user._id;
-    const userRole = req.user.role;
-    const { reason } = req.body; // Optional reason for cancellation
+    try {
+        const updatedMove = await moveRequestService.updateMoveProgress(moveId, driverUserId, status, updateData);
+        res.status(200).json({
+            status: 'success',
+            message: `Move progress updated to ${status}.`,
+            data: updatedMove
+        });
+    } catch (error) {
+        return next(new ApiError(error.message, error.statusCode || 500));
+    }
+});
 
-    const result = await moveRequestService.cancelMove(moveId, userId, userRole, reason);
-    res.json(result);
+// @desc    Cancel a move
+// @route   POST /api/moves/:moveId/cancel
+// @access  Private (Customer, or Driver under certain conditions, or Admin)
+const cancelMove = asyncHandler(async (req, res, next) => {
+    const { id: moveId } = req.params;
+    const { _id: userId, role: userRole } = req.user;
+    const { reason } = req.body;
+
+    try {
+        const cancelledMove = await moveRequestService.cancelMoveRequest(moveId, userId, userRole, reason);
+        res.status(200).json({
+            status: 'success',
+            message: 'Move has been successfully cancelled.',
+            data: cancelledMove
+        });
+    } catch (error) {
+        return next(new ApiError(error.message, error.statusCode || 500));
+    }
 });
 
 

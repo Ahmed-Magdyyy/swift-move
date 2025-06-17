@@ -2,23 +2,33 @@ const express = require('express');
 const router = express.Router();
 const {
     getPriceEstimate,
-    // createMove,
+    createMoveRequest,
     getCustomerMoves,
     getDriverMoves,
-    // getMoveById,
-    // updateMoveStatus,
-    // rateMove,
+    getMoveDetails,
+    driverAcceptMove,
+    driverRejectMove,
+    updateMoveProgress,
+    cancelMove,
 } = require('../controllers/moveController');
 const { protect, allowedTo } = require('../controllers/authController');
-const { moveValidation, statusValidation, ratingValidation } = require('../Validation/moveValidator');
+const { 
+    getPriceEstimateValidator, 
+    createMoveRequestValidator, 
+    statusValidation, 
+} = require('../Validation/moveValidator');
+
+router.use(protect)
 
 // Routes
-router.post('/estimate', protect, allowedTo('customer'), moveValidation, getPriceEstimate);
-// router.post('/', protect, allowedTo('customer'), moveValidation, createMove);
-router.get('/customer', protect, allowedTo('customer'), getCustomerMoves);
-router.get('/driver', protect, allowedTo('driver'), getDriverMoves);
-// router.get('/:id', protect, getMoveById);
-// router.put('/:id/status', protect, allowedTo('driver'), statusValidation, updateMoveStatus);
-// router.post('/:id/rate', protect, allowedTo('customer'), ratingValidation, rateMove);
+router.post('/estimate', allowedTo('customer'), getPriceEstimateValidator, getPriceEstimate);
+router.post('/', allowedTo('customer'), createMoveRequestValidator, createMoveRequest);
+router.get('/customer', allowedTo('customer'), getCustomerMoves);
+router.get('/driver', allowedTo('driver'), getDriverMoves);
+router.get('/:id', allowedTo('customer', 'driver', 'admin'), getMoveDetails);
+router.post('/:id/accept', allowedTo('driver'), driverAcceptMove);
+router.post('/:id/reject', allowedTo('driver'), driverRejectMove);
+router.put('/:id/progress', allowedTo('driver'), statusValidation, updateMoveProgress);
+router.post('/:id/cancel', allowedTo('customer', 'driver', 'admin'), cancelMove); // Auth is handled in the service
 
-module.exports = router; 
+module.exports = router;

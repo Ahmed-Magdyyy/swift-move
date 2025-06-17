@@ -4,20 +4,20 @@ class PricingService {
     constructor() {
         this.baseRates = {
             bike: {
-                basePrice: 10,
-                perKmRate: 2
-            },
-            car: {
                 basePrice: 20,
-                perKmRate: 3
-            },
-            van: {
-                basePrice: 30,
                 perKmRate: 4
             },
-            truck: {
-                basePrice: 50,
+            car: {
+                basePrice: 30,
                 perKmRate: 5
+            },
+            van: {
+                basePrice: 40,
+                perKmRate: 6
+            },
+            truck: {
+                basePrice: 60,
+                perKmRate: 7
             }
         };
 
