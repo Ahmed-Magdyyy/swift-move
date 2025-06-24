@@ -80,6 +80,13 @@ class GoogleMapsService {
                 throw new ApiError('requestedVehicleType is required.', 400);
             }
 
+            console.log('[GoogleMapsService] Searching for drivers with criteria:', {
+                pickupCoordinates,
+                requestedVehicleType,
+                radius,
+                time: new Date().toISOString()
+            });
+
             const query = {
                 'vehicle.type': requestedVehicleType,
                 isAvailable: true,
@@ -95,11 +102,24 @@ class GoogleMapsService {
                 }
             };
 
-
             const drivers = await Driver.find(query)
                 .populate('user', 'name phone averageRating profileImage')
+                .explain('executionStats');
 
-            return drivers.map(driver => ({
+            // Now get the actual drivers
+            const driverResults = await Driver.find(query)
+                .populate('user', 'name phone averageRating profileImage');
+
+            console.log(`[GoogleMapsService] Found ${driverResults.length} matching drivers.`);
+            driverResults.forEach(driver => console.log('Matching driver:', {
+                driverId: driver.user._id.toString(),
+                status: driver.status,
+                isAvailable: driver.isAvailable,
+                vehicleType: driver.vehicle.type,
+                currentLocation: driver.currentLocation.coordinates
+            }));
+
+            return driverResults.map(driver => ({
                 driverId: driver.user._id.toString(),
                 name: driver.user.name,
                 phone: driver.user.phone,

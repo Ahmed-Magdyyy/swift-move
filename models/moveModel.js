@@ -52,6 +52,7 @@ const moveSchema = new mongoose.Schema({
         instructions: String
     },
     items: [{
+        _id: false,
         name: {
             type: String,
             required: [true, 'Item name is required.']

@@ -1,4 +1,7 @@
 const socketIO = require('socket.io');
+const jwt = require('jsonwebtoken');
+const { promisify } = require('util');
+const User = require('../models/userModel');
 const Move = require('../models/moveModel'); // For context like customer/driver IDs from a moveId
 const googleMapsService = require('./googleMapsService'); // For any distance calculations
 
@@ -30,6 +33,36 @@ class TrackingService {
 
         this.io.on('connection', (socket) => {
             console.log(`[TrackingService] Client connected: ${socket.id}`);
+
+            // --- Authentication --- 
+            // Verify user token and join them to a private room for targeted notifications
+            socket.on('client:authenticate', async (payload) => {
+                try {
+                    if (!payload || !payload.token) {
+                        throw new Error('Authentication token not provided.');
+                    }
+
+                    // 1. Verify the token
+                    const decoded = await promisify(jwt.verify)(payload.token, process.env.JWT_ACCESS_SECRET);
+                    // 2. Check if the user still exists
+                    const user = await User.findById(decoded.userId);
+                    if (!user) {
+                        throw new Error('User not found.');
+                    }
+
+                    // 3. Join a private room named after the user's ID
+                    const userRoom = `user_${user._id}`;
+                    socket.join(userRoom);
+                    console.log(`[TrackingService] Socket ${socket.id} authenticated for user ${user._id} and joined room ${userRoom}`);
+
+                    // 4. Send a success confirmation back to the client
+                    socket.emit('authentication_success', { message: `Successfully authenticated and joined room ${userRoom}` });
+
+                } catch (error) {
+                    console.error(`[TrackingService] Authentication failed for socket ${socket.id}:`, error.message);
+                    socket.emit('authentication_failed', { error: 'Invalid token or user.' });
+                }
+            });
 
             // --- Generic Room Management ---
             // Allows clients to join arbitrary rooms.
@@ -138,27 +171,57 @@ class TrackingService {
     }
 
     /**
-     * Convenience method to notify a specific customer.
-     * Joins/emits to `customer:<customerId>` room.
+     * Sends a notification to a specific user's private room.
+     * @param {string} userId The ID of the user to notify.
+     * @param {string} eventName The name of the socket event.
+     * @param {object} data The payload to send.
      */
-    notifyCustomer(customerId, eventName, data) {
-        if (customerId) {
-            this.notifyRoom(`customer:${customerId}`, eventName, data);
-        } else {
-            console.warn(`[TrackingService] notifyCustomer: customerId is required.`);
-        }
+    notifyUser(userId, eventName, data) {
+        if (!userId || !eventName) return;
+        const userRoom = `user_${userId}`;
+        this.io.to(userRoom).emit(eventName, data);
+        console.log(`[TrackingService] Emitted '${eventName}' to secure room ${userRoom}`);
     }
 
     /**
-     * Convenience method to notify a specific driver.
-     * Joins/emits to `driver:<driverId>` room.
+     * Notifies a specific customer by sending an event to their private room.
+     * @param {string} customerId The customer's user ID.
+     * @param {string} eventName The event name.
+     * @param {object} data The payload.
+     */
+    notifyCustomer(customerId, eventName, data) {
+        this.notifyUser(customerId, eventName, data);
+    }
+
+    /**
+     * Notifies a specific driver by sending an event to their private room.
+     * @param {string} driverId The driver's user ID.
+     * @param {string} eventName The event name.
+     * @param {object} data The payload.
      */
     notifyDriver(driverId, eventName, data) {
-        if (driverId) {
-            this.notifyRoom(`driver:${driverId}`, eventName, data);
-        } else {
-            console.warn(`[TrackingService] notifyDriver: driverId is required.`);
+        if (!driverId || !eventName) {
+            console.warn(`[TrackingService] Cannot notify driver: missing driverId or eventName`);
+            return;
         }
+        
+        const userRoom = `user_${driverId}`;
+        
+        if (!this.io) {
+            console.error('[TrackingService] Socket.IO not initialized');
+            return;
+        }
+        
+        // Check if the room exists and has active sockets
+        const roomSockets = this.io.sockets.adapter.rooms.get(userRoom);
+        if (!roomSockets || roomSockets.size === 0) {
+            console.warn(`[TrackingService] No active sockets found for driver ${driverId}. Driver might be offline.`);
+            return;
+        }
+        
+        // Emit the event to the room
+        this.io.to(userRoom).emit(eventName, data);
+        console.log(`[TrackingService] Sent '${eventName}' to driver ${driverId}`);
     }
 
     // --- Internal Helper Methods ---

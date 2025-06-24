@@ -12,7 +12,7 @@ const ApiError = require("./utils/ApiError");
 const globalError = require("./middlewares/errorMiddleware");
 const dbConnection = require("./config/database");
 
-const socketConfig = require("./socketConfig");
+const trackingService = require("./services/trackingService");
 
 // Routes
 const mountRoutes = require("./routes");
@@ -80,8 +80,8 @@ const server = app.listen(process.env.PORT, () =>
   console.log(`Example app listening on port ${PORT}!`)
 );
 
-// Initialize Socket.IO
-socketConfig.initSocketServer(server);
+// Initialize Socket.IO and Tracking Service
+trackingService.initialize(server);
 
 // UnhandledRejections event handler (rejection outside express)
 process.on("unhandledRejection", (err) => {
