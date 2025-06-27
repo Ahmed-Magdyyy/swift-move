@@ -331,8 +331,6 @@ exports.rateDriver = asyncHandler(async (req, res, next) => {
     if (!move.driver || move.driver.toString() !== driverId) {
         return next(new ApiError('This driver was not assigned to the specified move.', 400));
     }
-console.log(move.driver.toString());
-console.log(driverId);
 
     const driver = await Driver.findOne({ user: driverId });
     if (!driver) {

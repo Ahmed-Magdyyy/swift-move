@@ -96,7 +96,7 @@ const getDriverMoves = asyncHandler(async (req, res, next) => {
             data: moves
         });
     } catch (error) {
-        return next(new ApiError(error.message, error.statusCode || 500));
+        return next(new ApiError(error.message, error.statusCode || 500, error));
     }
 });
 

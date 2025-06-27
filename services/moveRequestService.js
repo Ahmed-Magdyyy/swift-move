@@ -377,14 +377,17 @@ class MoveRequestService {
             if (!move.driver || move.driver._id.toString() !== driverUserId.toString()) {
                 throw new ApiError('Driver not authorized for this move.', 403);
             }
+
+            if(move.status === moveStatus.DELIVERED) {
+                throw new ApiError('Cant update move status as it is already delivered.', 400);
+            }
+
             if (!this._isValidStatusTransition(move.status, newStatus)) {
                 throw new ApiError(`Invalid status transition from ${move.status} to ${newStatus}.`, 400);
             }
 
             move.status = newStatus;
 
-            // The pre-save hook in the Move model is responsible for setting the actual pickup/delivery times.
-            // We only need to handle the finalization logic here.
             if (newStatus === moveStatus.DELIVERED) {
                 await this._finalizeMoveCompletion(move, session);
             }
@@ -542,6 +545,8 @@ class MoveRequestService {
             const totalPages = Math.ceil(totalMoves / limit);
 
             const moves = await Move.find(filter)
+                .populate('customer', 'name email phone image')
+                .populate('driver', 'name email phone image')
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)

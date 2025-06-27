@@ -29,6 +29,6 @@ router.get('/:id', allowedTo('customer', 'driver', 'admin'), getMoveDetails);
 router.put('/:id/accept', allowedTo('driver'), driverAcceptMove);
 router.put('/:id/reject', allowedTo('driver'), driverRejectMove);
 router.put('/:id/progress', allowedTo('driver'), statusValidation, updateMoveProgress);
-router.post('/:id/cancel', allowedTo('customer', 'driver', 'admin'), cancelMove); // Auth is handled in the service
+router.post('/:id/cancel', allowedTo('customer', 'driver', 'admin'), cancelMove);
 
 module.exports = router;
