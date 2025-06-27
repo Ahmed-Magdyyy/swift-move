@@ -4,13 +4,16 @@ const { promisify } = require('util');
 const User = require('../models/userModel');
 const Move = require('../models/moveModel'); // For context like customer/driver IDs from a moveId
 const googleMapsService = require('./googleMapsService'); // For any distance calculations
-
+const { moveStatus } = require('../utils/Constant/enum');
+const Driver = require('../models/driverModel');
 
 class TrackingService {
     constructor() {
         this.io = null;
         // Stores current driver locations: driverId -> { location: { latitude, longitude }, socketId, timestamp }
         this.driverLocations = new Map();
+        // Stores userId -> socketId for quick lookups
+        this.connectedUsers = new Map();
     }
 
     /**
@@ -50,13 +53,17 @@ class TrackingService {
                         throw new Error('User not found.');
                     }
 
-                    // 3. Join a private room named after the user's ID
+                    // 3. Join a private room and store user info on the socket
                     const userRoom = `user_${user._id}`;
                     socket.join(userRoom);
-                    console.log(`[TrackingService] Socket ${socket.id} authenticated for user ${user._id} and joined room ${userRoom}`);
+                    socket.userId = user._id.toString();
+                    socket.userRole = user.role;
+                    this.connectedUsers.set(socket.userId, socket.id); // Add to connected users map
+
+                    console.log(`[TrackingService] Socket ${socket.id} authenticated for user ${socket.userId} (${socket.userRole}) and joined room ${userRoom}`);
 
                     // 4. Send a success confirmation back to the client
-                    socket.emit('authentication_success', { message: `Successfully authenticated and joined room ${userRoom}` });
+                    socket.emit('authentication_success', { message: `Successfully authenticated as ${socket.userRole} and joined room ${userRoom}` });
 
                 } catch (error) {
                     console.error(`[TrackingService] Authentication failed for socket ${socket.id}:`, error.message);
@@ -88,61 +95,81 @@ class TrackingService {
             });
 
             // --- Driver-Specific Functionality ---
-            socket.on('driver_location_update', async (data) => {
-                const { driverId, latitude, longitude, moveId } = data;
-
-                if (!driverId || typeof latitude !== 'number' || typeof longitude !== 'number') {
-                    socket.emit('location_update_error', { message: 'Driver ID and valid coordinates are required.' });
-                    return;
+            socket.on('driver:location_update', async (data) => {
+                // Ensure the user is authenticated and is a driver
+                if (!socket.userId || socket.userRole !== 'driver') {
+                    return socket.emit('error', { message: 'Authentication required or not a driver.' });
                 }
 
-                const location = { latitude, longitude };
+                const driverId = socket.userId;
+                const { location, moveId } = data; // location is { latitude, longitude }
+
+                if (!location || typeof location.latitude !== 'number' || typeof location.longitude !== 'number' || !moveId) {
+                    return socket.emit('location_update_error', { message: 'Valid location and moveId are required.' });
+                }
+
+                // Store the driver's most recent location
                 this.driverLocations.set(driverId, { location, socketId: socket.id, timestamp: new Date() });
                 // console.log(`[TrackingService] Driver ${driverId} location updated:`, location);
 
-                // If moveId is provided, notify the specific move room about the driver's new location.
-                if (moveId) {
-                    this.notifyRoom(`move:${moveId}`, 'driver_location_on_move', { driverId, location, moveId });
+                try {
+                    // Find the move to get the customer ID
+                    const move = await Move.findById(moveId).select('customer status').lean();
 
-                    // Optional: Proximity alerts - this is a simple real-time logic piece
-                    try {
-                        const move = await Move.findById(moveId).select('customer pickup delivery status').lean();
-                        if (move && move.customer) {
-                            const customerRoom = `customer:${move.customer.toString()}`;
-                            const driverGeoJSONPoint = [longitude, latitude];
-
-                            if (move.status === 'accepted') {
-                                if(move.pickup && move.pickup.coordinates && move.pickup.coordinates.coordinates) {
-                                    const distanceToPickup = await this._calculateDistanceInternal(driverGeoJSONPoint, move.pickup.coordinates.coordinates);
-                                    if (distanceToPickup < 200) { // e.g., 200 meters
-                                        this.notifyRoom(customerRoom, 'driver_approaching_pickup', { moveId, distance: distanceToPickup });
-                                    }
-                                }
-                            } else if (move.status === 'in_transit') {
-                                 if(move.delivery && move.delivery.coordinates && move.delivery.coordinates.coordinates) {
-                                    const distanceToDelivery = await this._calculateDistanceInternal(driverGeoJSONPoint, move.delivery.coordinates.coordinates);
-                                    if (distanceToDelivery < 200) { // e.g., 200 meters
-                                        this.notifyRoom(customerRoom, 'driver_approaching_delivery', { moveId, distance: distanceToDelivery });
-                                    }
-                                 }
-                            }
-                        }
-                    } catch(error) {
-                        console.error(`[TrackingService] Error in proximity check for move ${moveId}:`, error);
+                    if (!move || !move.customer) {
+                        return socket.emit('location_update_error', { message: 'Associated move or customer not found.' });
                     }
+
+                    // Only forward location if the move is in an active, trackable state
+                    const trackableStatuses = [
+                        moveStatus.ACCEPTED,
+                        moveStatus.ARRIVED_AT_PICKUP,
+                        moveStatus.PICKED_UP,
+                        moveStatus.IN_TRANSIT,
+                        moveStatus.ARRIVED_AT_DELIVERY
+                    ];
+
+                    if (trackableStatuses.includes(move.status)) {
+                        const customerId = move.customer.toString();
+
+                        // Notify the specific customer in their private room
+                        this.notifyUser(customerId, 'customer:driver_location_updated', {
+                            driverId,
+                            location,
+                            moveId
+                        });
+                    }
+                } catch (error) {
+                    console.error(`[TrackingService] Error processing location update for move ${moveId}:`, error);
+                    socket.emit('location_update_error', { message: 'An internal error occurred.' });
                 }
             });
 
             // --- Disconnection ---
-            socket.on('disconnect', () => {
-                console.log(`[TrackingService] Client disconnected: ${socket.id}`);
-                // Optional: Remove driver from driverLocations if their socket matches.
-                // This needs careful handling if a driver can have multiple connections or quick reconnections.
-                for (const [driverId, data] of this.driverLocations.entries()) {
-                    if (data.socketId === socket.id) {
-                        // this.driverLocations.delete(driverId); // Or mark as inactive
-                        // console.log(`[TrackingService] Cleaned up location for driver ${driverId} on disconnect.`);
-                        break;
+            socket.on('disconnect', async (reason) => {
+                console.log(`[TrackingService] Socket ${socket.id} disconnected. Reason: ${reason}`);
+                
+                if (socket.userId) {
+                    // Remove from our maps
+                    this.connectedUsers.delete(socket.userId);
+                    this.driverLocations.delete(socket.userId);
+
+                    // If the disconnected user was a driver, automatically set them to unavailable as a safety net.
+                    if (socket.userRole === 'driver') {
+                        try {
+                            // Using findOneAndUpdate is more atomic and only acts if they were available
+                            const updatedDriver = await Driver.findOneAndUpdate(
+                                { user: socket.userId, isAvailable: true },
+                                { isAvailable: false },
+                                { new: true }
+                            );
+
+                            if (updatedDriver) {
+                                console.log(`[TrackingService] Driver for user ${socket.userId} automatically set to unavailable due to disconnect.`);
+                            }
+                        } catch (error) {
+                            console.error(`[TrackingService] Error setting driver to unavailable on disconnect for user ${socket.userId}:`, error);
+                        }
                     }
                 }
             });
@@ -258,6 +285,15 @@ class TrackingService {
      */
     getDriverLocation(driverId) {
         return this.driverLocations.get(driverId)?.location || null;
+    }
+
+    /**
+     * Checks if a user has an active and authenticated socket connection.
+     * @param {string} userId The ID of the user to check.
+     * @returns {boolean} True if the user is connected, false otherwise.
+     */
+    isUserConnected(userId) {
+        return this.connectedUsers.has(userId.toString());
     }
 }
 

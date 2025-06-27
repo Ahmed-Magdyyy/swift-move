@@ -1,7 +1,7 @@
 const { check, body } = require("express-validator");
 const validatorMiddleware = require("../middlewares/validatorMiddleware");
 const { vehicleType, driverStatus } = require("../utils/Constant/enum");
-const Driver = require("../models/driverModel");
+const Move = require("../models/moveModel");
 const ApiError = require("../utils/ApiError");
 
 exports.validateOnboarding = [
@@ -90,11 +90,13 @@ exports.validateRateDriver = [
         .isMongoId()
         .withMessage("Invalid Move ID format")
         .custom(async (moveId, { req }) => {
-            const move = await Driver.findById(req.params.id);
+            const move = await Move.findById(moveId);
             if (!move) {
                 throw new ApiError('Move not found', 404);
             }
-            // Further checks on move status and customer authorization will be in the controller
+            if (move.status !== 'delivered') {
+                throw new ApiError('Cannot rate driver for a move that is not yet delivered.', 400);
+            }
             return true;
         }),
     validatorMiddleware,

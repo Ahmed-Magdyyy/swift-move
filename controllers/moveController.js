@@ -61,11 +61,16 @@ const createMoveRequest = asyncHandler(async (req, res, next) => {
 // @access  Private (Customer)
 const getCustomerMoves = asyncHandler(async (req, res, next) => {
     const customerId = req.user._id;
+    const { page, limit } = req.query;
+
     try {
-        const moves = await moveRequestService.getMovesForCustomer(customerId);
+        const { moves, totalPages, currentPage } = await moveRequestService.getMovesForCustomer(customerId, { page, limit });
+
         res.status(200).json({
             status: 'success',
-            count: moves.length,
+            totalPages,
+            page: currentPage,
+            results: moves.length,
             data: moves
         });
     } catch (error) {
@@ -78,11 +83,16 @@ const getCustomerMoves = asyncHandler(async (req, res, next) => {
 // @access  Private (Driver)
 const getDriverMoves = asyncHandler(async (req, res, next) => {
     const driverId = req.user._id;
+    const { page, limit } = req.query;
+
     try {
-        const moves = await moveRequestService.getMovesForDriver(driverId);
+        const { moves, totalPages, currentPage } = await moveRequestService.getMovesForDriver(driverId, { page, limit });
+
         res.status(200).json({
             status: 'success',
-            count: moves.length,
+            totalPages,
+            page: currentPage,
+            results: moves.length,
             data: moves
         });
     } catch (error) {
@@ -93,7 +103,7 @@ const getDriverMoves = asyncHandler(async (req, res, next) => {
 // @desc    Get move by ID
 // @route   GET /api/moves/:moveId
 // @access  Private (Customer or assigned Driver or Admin)
-const getMoveDetails = asyncHandler(async (req, res, next) => {
+const getMoveDetails = asyncHandler(async (req, res, next) => {    
     const { id: moveId } = req.params;
     const { _id: userId, role: userRole } = req.user;
 
@@ -109,7 +119,7 @@ const getMoveDetails = asyncHandler(async (req, res, next) => {
 });
 
 // @desc    Driver accepts a move request
-// @route   POST /api/moves/:moveId/accept
+// @route   put /api/moves/:moveId/accept
 // @access  Private (Driver)
 const driverAcceptMove = asyncHandler(async (req, res, next) => {
     const { id: moveId } = req.params;
@@ -120,7 +130,7 @@ const driverAcceptMove = asyncHandler(async (req, res, next) => {
         res.status(200).json({
             status: 'success',
             message: 'Move accepted successfully.',
-            data: result.move // The service returns the updated move document
+            data: result // The service returns the updated move document
         });
     } catch (error) {
         return next(new ApiError(error.message, error.statusCode || 500));
@@ -128,7 +138,7 @@ const driverAcceptMove = asyncHandler(async (req, res, next) => {
 });
 
 // @desc    Driver rejects a move request
-// @route   POST /api/moves/:moveId/reject
+// @route   PUT /api/moves/:moveId/reject
 // @access  Private (Driver)
 const driverRejectMove = asyncHandler(async (req, res, next) => {
     const { id: moveId } = req.params;
@@ -152,10 +162,10 @@ const driverRejectMove = asyncHandler(async (req, res, next) => {
 const updateMoveProgress = asyncHandler(async (req, res, next) => {
     const { id: moveId } = req.params;
     const { _id: driverUserId } = req.user;
-    const { status, ...updateData } = req.body; // e.g., location, notes
+    const { status } = req.body;
 
     try {
-        const updatedMove = await moveRequestService.updateMoveProgress(moveId, driverUserId, status, updateData);
+        const updatedMove = await moveRequestService.updateMoveProgress(moveId, driverUserId, status);
         res.status(200).json({
             status: 'success',
             message: `Move progress updated to ${status}.`,

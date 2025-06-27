@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { moveStatus, vehicleType } = require('../utils/Constant/enum');
 
 const moveSchema = new mongoose.Schema({
     customer: {
@@ -12,8 +13,8 @@ const moveSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'accepted', 'picked_up', 'in_transit', 'delivered', 'cancelled'],
-        default: 'pending'
+        enum: Object.values(moveStatus),
+        default: moveStatus.PENDING
     },
     pickup: {
         address: {
@@ -65,7 +66,7 @@ const moveSchema = new mongoose.Schema({
     }],
     vehicleType: {
         type: String,
-        enum: ['bike', 'car', 'van', 'truck'],
+        enum: Object.values(vehicleType),
         required: true
     },
     scheduledFor: {

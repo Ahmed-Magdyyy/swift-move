@@ -57,15 +57,9 @@ const userSchema = new mongoose.Schema(
     image: {
       secure_url: {
         type: String,
-        // required: function () {
-        //   return this.provider == "system" ? true : false;
-        // },
       },
       public_id: {
         type: String,
-        // required: function () {
-        //   return this.provider == "system" ? true : false;
-        // },
       },
     },
     refreshTokens: {

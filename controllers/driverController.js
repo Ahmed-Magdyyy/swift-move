@@ -5,6 +5,7 @@ const User = require('../models/userModel');
 const { cloudinary } = require('../utils/Cloudinary/cloud');
 const Move = require('../models/moveModel');
 const { roles } = require('../utils/Constant/enum');
+const trackingService = require('../services/trackingService');
 
 // @desc    Get driver profile
 // @route   GET /api/v1/drivers/profile
@@ -72,22 +73,29 @@ exports.updateDriverProfile = asyncHandler(async (req, res, next) => {
 // @route   PUT /api/v1/drivers/location
 // @access  Private (Driver only)
 exports.updateLocation = asyncHandler(async (req, res, next) => {
-    const { coordinates } = req.body;
+    const driver = await Driver.findOne({ user: req.user._id });
 
-    const driver = await Driver.findOneAndUpdate(
-        { user: req.user._id },
-        {
-            currentLocation: {
-                type: 'Point',
-                coordinates
-            }
-        },
-        { new: true }
-    );
+    if (!driver) {
+        return next(new ApiError('Driver profile not found.', 404));
+    }
+
+    // Only allow location updates if isAvailable is true.
+    if (!driver.isAvailable) {
+        return next(new ApiError('Cannot update location while offline. Please go online first.', 403));
+    }
+
+    const { coordinates } = req.body;
+    driver.currentLocation = {
+        type: 'Point',
+        coordinates
+    };
+
+    await driver.save();
 
     res.status(200).json({
         status: 'success',
-        data: driver
+        message: 'Location updated successfully.',
+        data: driver.currentLocation
     });
 });
 
@@ -105,8 +113,18 @@ exports.updateAvailability = asyncHandler(async (req, res, next) => {
         return next(new ApiError('Can not update availability. Driver is not accepted', 400));
     }
 
-    // Toggle the availability status
-    driver.isAvailable = !driver.isAvailable;
+    const newAvailability = !driver.isAvailable;
+
+    // **Heartbeat Check**
+    // If the driver is trying to go ONLINE, check if they have an active WebSocket connection.
+    if (newAvailability === true) {
+        if (!trackingService.isUserConnected(req.user._id)) {
+            return next(new ApiError('Could not establish a real-time connection. Please check your internet and try again.', 400));
+        }
+    }
+
+    // Set the new availability status
+    driver.isAvailable = newAvailability;
     await driver.save();
 
     res.status(200).json({
@@ -290,7 +308,7 @@ exports.deleteDriver = asyncHandler(async (req, res, next) => {
 // @access  Private (Customer only)
 exports.rateDriver = asyncHandler(async (req, res, next) => {
     const { id: driverId } = req.params;
-    const { rate, comment, moveId } = req.body; // 'rating' for value, 'comment' for text
+    const { rate, comment, moveId } = req.body;
     const customerId = req.user._id;
 
     if (!rate || typeof rate !== 'number' || rate < 1 || rate > 5 || !Number.isInteger(rate)) {
@@ -313,8 +331,10 @@ exports.rateDriver = asyncHandler(async (req, res, next) => {
     if (!move.driver || move.driver.toString() !== driverId) {
         return next(new ApiError('This driver was not assigned to the specified move.', 400));
     }
+console.log(move.driver.toString());
+console.log(driverId);
 
-    const driver = await Driver.findById(driverId);
+    const driver = await Driver.findOne({ user: driverId });
     if (!driver) {
         return next(new ApiError('Driver not found.', 404));
     }

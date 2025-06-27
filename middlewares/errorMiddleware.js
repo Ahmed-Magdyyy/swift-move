@@ -56,6 +56,7 @@ const globalError =async (err, req, res, next) => {
   if( req.failImage?.public_id){
      await deleteImageCloud( req.failImage.public_id)
   }
+console.log("error:" ,err);
 
   err.statusCode = err.statusCode || 500;
   err.status = err.status || "error";

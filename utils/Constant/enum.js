@@ -20,10 +20,14 @@ const enabledControls = {
 const moveStatus = {
   PENDING: "pending",
   ACCEPTED: "accepted",
+  ARRIVED_AT_PICKUP: "arrived_at_pickup",
   PICKED_UP: "picked_up",
-  IN_TRANSIT: "in_transit",
+  ARRIVED_AT_DELIVERY: "arrived_at_delivery",
   DELIVERED: "delivered",
-  CANCELLED: "cancelled"
+  CANCELLED_BY_CUSTOMER: "cancelled_by_customer",
+  CANCELLED_BY_DRIVER: "cancelled_by_driver",
+  CANCELLED_BY_ADMIN: "cancelled_by_admin",
+  NO_DRIVERS_AVAILABLE: "no_drivers_available"
 };
 
 const vehicleType = {

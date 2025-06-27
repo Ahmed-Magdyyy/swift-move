@@ -6,11 +6,11 @@ const User = require('../models/userModel');
 const pricingService = require('./pricingService');
 const googleMapsService = require('./googleMapsService');
 const trackingService = require('./trackingService');
-const { moveStatus, userRoles } = require('../utils/Constant/enum');
+const { moveStatus, roles } = require('../utils/Constant/enum');
 const ApiError = require('../utils/ApiError');
 
 const MAX_DRIVER_SEARCH_ATTEMPTS = 3;
-const DRIVER_RESPONSE_TIMEOUT = 30000; // 30 seconds
+const DRIVER_RESPONSE_TIMEOUT = 60000; // 60 seconds
 
 class MoveRequestService {
     constructor() {
@@ -18,6 +18,24 @@ class MoveRequestService {
     }
 
     async initiateNewMove(customerId, moveData) {
+        // 1. Check if the customer already has an active move
+        const terminalStates = [
+            moveStatus.DELIVERED,
+            moveStatus.CANCELLED_BY_ADMIN,
+            moveStatus.CANCELLED_BY_CUSTOMER,
+            moveStatus.CANCELLED_BY_DRIVER,
+            moveStatus.NO_DRIVERS_AVAILABLE
+        ];
+
+        const existingMove = await Move.findOne({
+            customer: customerId,
+            status: { $nin: terminalStates }
+        });
+
+        if (existingMove) {
+            throw new ApiError('You already have an active move. You cannot create a new one until the current move is completed or cancelled.', 409);
+        }
+
         const { pickup, delivery, items, vehicleType, scheduledFor } = moveData;
         const session = await mongoose.startSession();
         let move;
@@ -134,7 +152,6 @@ class MoveRequestService {
                 notifiedDrivers: [driverToNotify.driverId],
                 currentDriverId: driverToNotify.driverId,
                 attempt: attempt,
-                session: session, // Keep session reference for later use
                 timeoutId: setTimeout(
                     () => this.handleDriverResponseTimeout(move._id.toString(), driverToNotify.driverId), 
                     DRIVER_RESPONSE_TIMEOUT
@@ -177,10 +194,7 @@ class MoveRequestService {
         if (notificationState.timeoutId) {
             clearTimeout(notificationState.timeoutId);
         }
-        
-        // Remove from pending notifications before handling rejection
-        this.pendingDriverNotifications.delete(moveId);
-        
+
         try {
             // Handle the rejection with the existing session if available
             await this.handleDriverRejection(moveId, driverId, "timeout");
@@ -198,7 +212,7 @@ class MoveRequestService {
         try {
             await session.withTransaction(async () => {
                 // Get the move with the customer populated
-                move = await Move.findById(moveId).populate('customer').session(session);
+                move = await Move.findById(moveId).populate('customer', '_id name email phone image').session(session);
                 if (!move) throw new ApiError('Move not found.', 404);
                 
                 // Check if the move can be accepted
@@ -252,6 +266,7 @@ class MoveRequestService {
             
             // Notify the customer that their move was accepted
             trackingService.notifyCustomer(move.customer._id.toString(), 'move:accepted', {
+                message: 'A driver has accepted your move request!',
                 moveId: move._id.toString(),
                 driver: {
                     id: driver.user._id.toString(),
@@ -261,7 +276,12 @@ class MoveRequestService {
                     rating: driver.rating
                 },
                 estimatedArrival: '5-10 minutes', // You might want to calculate this
-                message: 'A driver has accepted your move request!'
+            });
+
+            // Also, notify the driver for confirmation
+            trackingService.notifyDriver(driver.user._id.toString(), 'driver:move_accepted_confirmation', {
+                message: 'You have successfully accepted the move. Please go to the pickup location.',
+                move: move.toObject()
             });
             
             return move.toObject();
@@ -291,84 +311,70 @@ class MoveRequestService {
     }
 
     async handleDriverRejection(moveId, driverUserId, reason = "rejected") {
-        let session;
+        const session = await mongoose.startSession();
         try {
-            // Get the existing session from pending notifications if available
-            const notificationState = this.pendingDriverNotifications.get(moveId);
-            
-            // If no notification state, the move might have been accepted by another driver
-            if (!notificationState) {
-                console.log(`No notification state found for move ${moveId}, it may have been accepted by another driver`);
-                return;
-            }
-
-            // Clear the timeout if it exists
-            if (notificationState.timeoutId) {
-                clearTimeout(notificationState.timeoutId);
-            }
-
-            // Use the existing session if available, or create a new one
-            session = notificationState.session || await mongoose.startSession();
-            if (!notificationState.session) {
-                session.startTransaction();
-            }
-
-            const move = await Move.findById(moveId).session(session);
-            if (!move || move.status !== moveStatus.PENDING || move.driver) {
-                if (session.inTransaction()) await session.abortTransaction();
-                return;
-            }
-
-            const excludedDriverIds = notificationState.excludedDriverIds || [driverUserId];
-            const currentAttempt = notificationState.attempt || 0;
-
-            // Remove from pending notifications
-            this.pendingDriverNotifications.delete(moveId);
-
-            if (currentAttempt < MAX_DRIVER_SEARCH_ATTEMPTS) {
-                // Find and notify the next driver using the existing session
-                await this._findAndNotifyDrivers(move, session, currentAttempt + 1, excludedDriverIds);
-            } else {
-                // No more attempts, mark as no drivers available
-                move.status = moveStatus.NO_DRIVERS_AVAILABLE;
-                await move.save({ session });
-                await session.commitTransaction();
-                
-                trackingService.notifyCustomer(move.customer.toString(), 'move:no_drivers_found', { 
-                    moveId: move._id.toString(),
-                    message: 'No drivers accepted your request. Please try again later.'
-                });
-            }
-        } catch (error) {
-            console.error(`Error handling driver rejection for move ${moveId}:`, error);
-            if (session && session.inTransaction()) {
-                await session.abortTransaction();
-            }
-            
-            // Only throw if it's an ApiError, otherwise just log it
-            if (error instanceof ApiError) throw error;
-            console.error(`Non-ApiError in handleDriverRejection: ${error.message}`);
-        } finally {
-            if (session) {
-                try {
-                    // Only end the session if we created it (it's not from the notification state)
-                    if (!notificationState || !notificationState.session) {
-                        await session.endSession();
-                    }
-                } catch (e) {
-                    console.error("Error ending session in handleDriverRejection:", e);
+            await session.withTransaction(async () => {
+                const notificationState = this.pendingDriverNotifications.get(moveId);
+                if (!notificationState) {
+                    console.warn(`[MoveRequestService] No notification state for move ${moveId} during rejection. Assuming it was handled.`);
+                    return; // Exit transaction gracefully
                 }
-            }
+
+                if (notificationState.timeoutId) {
+                    clearTimeout(notificationState.timeoutId);
+                }
+
+                const move = await Move.findById(moveId).session(session);
+                if (!move || move.status !== moveStatus.PENDING) {
+                    this.pendingDriverNotifications.delete(moveId); // Clean up state
+                    return;
+                }
+
+                const excludedDriverIds = [...notificationState.excludedDriverIds];
+                const pickupCoords = move.pickup.coordinates.coordinates;
+                const allNearbyDrivers = await googleMapsService.getNearbyDrivers(pickupCoords, move.vehicleType, 5000) || [];
+                const nextDriverToNotify = allNearbyDrivers.find(d => !excludedDriverIds.includes(d.driverId));
+
+                if (nextDriverToNotify) {
+                    const newNotificationData = {
+                        ...notificationState,
+                        currentDriverId: nextDriverToNotify.driverId,
+                        excludedDriverIds: [...excludedDriverIds, nextDriverToNotify.driverId],
+                        timeoutId: setTimeout(
+                            () => this.handleDriverResponseTimeout(move._id.toString(), nextDriverToNotify.driverId),
+                            DRIVER_RESPONSE_TIMEOUT
+                        )
+                    };
+                    this.pendingDriverNotifications.set(moveId, newNotificationData);
+                    trackingService.notifyDriver(nextDriverToNotify.driverId, 'driver:new_move_request', { move: move.toObject() });
+                    console.log(`[MoveRequestService] Rejection from ${driverUserId}, notifying next driver ${nextDriverToNotify.driverId} for move ${moveId}`);
+                } else {
+                    move.status = moveStatus.NO_DRIVERS_AVAILABLE;
+                    await move.save({ session });
+                    this.pendingDriverNotifications.delete(moveId); // Clean up state
+                    trackingService.notifyCustomer(move.customer.toString(), 'move:no_drivers_found', {
+                        moveId: move._id.toString(),
+                        message: 'No available drivers found after searching.'
+                    });
+                    console.log(`[MoveRequestService] No more drivers to notify for move ${moveId}`);
+                }
+            });
+        } catch (error) {
+            console.error(`Critical error in handleDriverRejection for move ${moveId}:`, error);
+            this.pendingDriverNotifications.delete(moveId); // Clean up state
+        } finally {
+            await session.endSession();
         }
     }
 
-    async updateMoveProgress(moveId, driverUserId, newStatus, updateData = {}) {
+    async updateMoveProgress(moveId, driverUserId, newStatus) {
         const session = await mongoose.startSession();
         session.startTransaction();
         try {
-            const move = await Move.findById(moveId).populate('customer').populate('driver').session(session);
+            const move = await Move.findById(moveId).populate('customer','_id name email phone image').populate('driver','_id name email phone image').session(session);
             if (!move) throw new ApiError('Move not found.', 404);
-            if (!move.driver || move.driver._id.toString() !== driverUserId) {
+            
+            if (!move.driver || move.driver._id.toString() !== driverUserId.toString()) {
                 throw new ApiError('Driver not authorized for this move.', 403);
             }
             if (!this._isValidStatusTransition(move.status, newStatus)) {
@@ -376,23 +382,51 @@ class MoveRequestService {
             }
 
             move.status = newStatus;
-            const now = new Date();
-            if (!move.actualTime) move.actualTime = {};
 
-            switch (newStatus) {
-                case moveStatus.ARRIVED_AT_PICKUP: move.actualTime.arrivedAtPickup = now; break;
-                case moveStatus.PICKED_UP: move.actualTime.pickup = now; break;
-                case moveStatus.ARRIVED_AT_DELIVERY: move.actualTime.arrivedAtDelivery = now; break;
-                case moveStatus.DELIVERED:
-                    move.actualTime.delivery = now;
-                    await this._finalizeMoveCompletion(move, session);
-                    break;
+            // The pre-save hook in the Move model is responsible for setting the actual pickup/delivery times.
+            // We only need to handle the finalization logic here.
+            if (newStatus === moveStatus.DELIVERED) {
+                await this._finalizeMoveCompletion(move, session);
             }
-            if (updateData.currentLocation) move.lastKnownDriverLocation = { type: 'Point', coordinates: updateData.currentLocation };
+
             await move.save({ session });
             await session.commitTransaction();
-            trackingService.notifyCustomer(move.customer._id.toString(), 'move:status_update', { /* ... */ });
-            if (newStatus === moveStatus.DELIVERED) trackingService.notifyDriver(driverUserId, 'move:completed_on_driver_side', { moveId });
+
+            // --- Notify Customer of Progress ---
+            const customerId = move.customer._id.toString();
+            let notificationMessage = '';
+
+            switch (newStatus) {
+                case moveStatus.ARRIVED_AT_PICKUP:
+                    notificationMessage = 'Your driver has arrived at the pickup location.';
+                    break;
+                case moveStatus.PICKED_UP:
+                    notificationMessage = 'Your items have been picked up and the move is now in transit.';
+                    break;
+                case moveStatus.ARRIVED_AT_DELIVERY:
+                    notificationMessage = 'Your driver has arrived at the delivery location.';
+                    break;
+                case moveStatus.DELIVERED:
+                    notificationMessage = 'Your move has been successfully completed!';
+                    break;
+            }
+
+            if (notificationMessage) {
+                trackingService.notifyCustomer(customerId, 'move:status_update', {
+                    moveId: move._id.toString(),
+                    status: newStatus,
+                    message: notificationMessage
+                });
+            }
+
+            // --- Notify Driver on Completion ---
+            if (newStatus === moveStatus.DELIVERED) {
+                trackingService.notifyDriver(move.driver._id.toString(), 'move:completed_on_driver_side', { 
+                    moveId, 
+                    message: 'Move successfully completed. Thank you!' 
+                });
+            }
+
             return move.toObject();
         } catch (error) {
             await session.abortTransaction();
@@ -406,14 +440,49 @@ class MoveRequestService {
 
     _isValidStatusTransition(currentStatus, newStatus) {
         const flow = {
-            [moveStatus.ACCEPTED]: [moveStatus.ARRIVED_AT_PICKUP, moveStatus.CANCELLED_BY_DRIVER, moveStatus.CANCELLED_BY_CUSTOMER],
-            [moveStatus.ARRIVED_AT_PICKUP]: [moveStatus.PICKED_UP, moveStatus.CANCELLED_BY_DRIVER, moveStatus.CANCELLED_BY_CUSTOMER],
-            [moveStatus.PICKED_UP]: [moveStatus.IN_TRANSIT, moveStatus.CANCELLED_BY_DRIVER],
-            [moveStatus.IN_TRANSIT]: [moveStatus.ARRIVED_AT_DELIVERY, moveStatus.CANCELLED_BY_DRIVER], // Driver might still cancel if major issue
-            [moveStatus.ARRIVED_AT_DELIVERY]: [moveStatus.DELIVERED],
+            [moveStatus.PENDING]: [
+                moveStatus.ACCEPTED,
+                moveStatus.NO_DRIVERS_AVAILABLE,
+                moveStatus.CANCELLED_BY_CUSTOMER,
+                moveStatus.CANCELLED_BY_ADMIN
+            ],
+            [moveStatus.ACCEPTED]: [
+                moveStatus.ARRIVED_AT_PICKUP,
+                moveStatus.CANCELLED_BY_CUSTOMER,
+                moveStatus.CANCELLED_BY_DRIVER,
+                moveStatus.CANCELLED_BY_ADMIN
+            ],
+            [moveStatus.ARRIVED_AT_PICKUP]: [
+                moveStatus.PICKED_UP,
+                moveStatus.CANCELLED_BY_CUSTOMER,
+                moveStatus.CANCELLED_BY_DRIVER,
+                moveStatus.CANCELLED_BY_ADMIN
+            ],
+            [moveStatus.PICKED_UP]: [
+                moveStatus.ARRIVED_AT_DELIVERY,
+                moveStatus.CANCELLED_BY_CUSTOMER,
+                moveStatus.CANCELLED_BY_DRIVER,
+                moveStatus.CANCELLED_BY_ADMIN
+            ],
+            [moveStatus.ARRIVED_AT_DELIVERY]: [
+                moveStatus.DELIVERED,
+                moveStatus.CANCELLED_BY_ADMIN
+            ],
         };
-        return (flow[currentStatus] && flow[currentStatus].includes(newStatus)) ||
-               (currentStatus === moveStatus.PENDING && [moveStatus.CANCELLED_BY_CUSTOMER, moveStatus.NO_DRIVERS_AVAILABLE, moveStatus.ACCEPTED].includes(newStatus));
+
+        const terminalStates = [
+            moveStatus.DELIVERED,
+            moveStatus.CANCELLED_BY_ADMIN,
+            moveStatus.CANCELLED_BY_CUSTOMER,
+            moveStatus.CANCELLED_BY_DRIVER,
+            moveStatus.NO_DRIVERS_AVAILABLE
+        ];
+
+        if (terminalStates.includes(currentStatus)) {
+            return false; // Cannot transition from a terminal state
+        }
+
+        return (flow[currentStatus] && flow[currentStatus].includes(newStatus)) || false;
     }
 
     async getMoveDetails(moveId, userId, userRole) {
@@ -434,7 +503,7 @@ class MoveRequestService {
         // 2. Authorization check
         const isCustomer = move.customer && move.customer._id.toString() === userId.toString();
         const isDriver = move.driver && move.driver._id.toString() === userId.toString();
-        const isAdmin = userRole === userRoles.ADMIN;
+        const isAdmin = userRole === roles.ADMIN;
 
         if (!isCustomer && !isDriver && !isAdmin) {
             throw new ApiError('Not authorized to view this move.', 403);
@@ -457,31 +526,56 @@ class MoveRequestService {
         return move;
     }
 
-    async getMovesForDriver(driverUserId) {
+    async getMovesForDriver(driverUserId, options = {}) {
         if (!driverUserId) {
             throw new ApiError('Driver ID is required.', 400);
         }
+
+        const page = options.page * 1 || 1;
+        const limit = options.limit * 1 || 10;
+        const skip = (page - 1) * limit;
+
         try {
-            // Note: The driver on the Move model is a reference to the 'user' document.
-            const moves = await Move.find({ driver: driverUserId })
+            const filter = { driver: driverUserId };
+
+            const totalMoves = await Move.countDocuments(filter);
+            const totalPages = Math.ceil(totalMoves / limit);
+
+            const moves = await Move.find(filter)
                 .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
                 .lean();
-            return moves;
+
+            return { moves, totalPages, currentPage: page, totalMoves };
         } catch (error) {
             console.error(`Error fetching moves for driver ${driverUserId}:`, error);
             throw new ApiError('Failed to retrieve driver moves.', 500);
         }
     }
 
-    async getMovesForCustomer(customerId) {
+    async getMovesForCustomer(customerId, options = {}) {
         if (!customerId) {
             throw new ApiError('Customer ID is required.', 400);
         }
+
+        const page = options.page * 1 || 1;
+        const limit = options.limit * 1 || 10;
+        const skip = (page - 1) * limit;
+
         try {
-            const moves = await Move.find({ customer: customerId })
+            const filter = { customer: customerId };
+
+            const totalMoves = await Move.countDocuments(filter);
+            const totalPages = Math.ceil(totalMoves / limit);
+
+            const moves = await Move.find(filter)
                 .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
                 .lean();
-            return moves;
+
+            return { moves, totalPages, currentPage: page, totalMoves };
         } catch (error) {
             console.error(`Error fetching moves for customer ${customerId}:`, error);
             throw new ApiError('Failed to retrieve customer moves.', 500);
@@ -506,13 +600,13 @@ class MoveRequestService {
             let canCancel = false;
             let newStatus = moveStatus.CANCELLED_BY_CUSTOMER;
 
-            if (userRole === userRoles.CUSTOMER && move.customer._id.toString() === userId) {
+            if (userRole === roles.CUSTOMER && move.customer._id.toString() === userId) {
                 if ([moveStatus.PENDING, moveStatus.ACCEPTED, moveStatus.ARRIVED_AT_PICKUP].includes(move.status)) canCancel = true;
-            } else if (userRole === userRoles.DRIVER && move.driver && move.driver._id.toString() === userId) {
+            } else if (userRole === roles.DRIVER && move.driver && move.driver._id.toString() === userId) {
                 if ([moveStatus.ACCEPTED, moveStatus.ARRIVED_AT_PICKUP, moveStatus.IN_TRANSIT].includes(move.status)) { // Driver might cancel during transit for emergencies
                     canCancel = true; newStatus = moveStatus.CANCELLED_BY_DRIVER;
                 }
-            } else if (userRole === userRoles.ADMIN) {
+            } else if (userRole === roles.ADMIN) {
                 canCancel = true; newStatus = moveStatus.CANCELLED_BY_ADMIN;
             }
 
