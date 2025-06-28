@@ -108,7 +108,7 @@ class TrackingService {
                         const customerId = move.customer.toString();
 
                         // Notify the specific customer in their private room
-                        this.notifyUser(customerId, 'customer:driver_location_updated', {
+                        this.notifyCustomer(customerId, 'customer:driver_location_updated', {
                             driverId: move.driver.toString(),
                             location,
                             moveId
@@ -173,6 +173,8 @@ class TrackingService {
         
         const userRoom = `user_${userId}`;
         const roomSockets = this.io.sockets.adapter.rooms.get(userRoom);
+
+        console.log(`[TrackingService] Notifying ${userType} ${userId} in room ${userRoom}`);
 
         if (!roomSockets || roomSockets.size === 0) {
             // This is a common case (user is offline), so a simple log is fine.
