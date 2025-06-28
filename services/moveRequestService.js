@@ -825,15 +825,23 @@ class MoveRequestService {
       const driverUserId = move.driver && move.driver.user ? move.driver.user._id.toString() : null;
 
       if (newStatus === moveStatus.CANCELLED_BY_CUSTOMER && driverUserId) {
-        trackingService.notifyDriver(driverUserId, 'move:cancelled', {
-          moveId,
-          message: `The move has been cancelled by the customer. Reason: ${reason}`,
-        });
+        if (driverUserId) {
+          trackingService.notifyDriver(driverUserId, 'move:cancelled', {
+            moveId,
+            message: `The move has been cancelled by the customer. Reason: ${reason}`,
+          });
+        }
       } else if (newStatus === moveStatus.CANCELLED_BY_DRIVER) {
         trackingService.notifyCustomer(customerId, 'move:cancelled', {
           moveId,
           message: `Your move has been cancelled by the driver. Reason: ${reason}`,
         });
+        if (driverUserId) {
+          trackingService.notifyDriver(driverUserId, 'move:cancelled', {
+            moveId,
+            message: 'You have successfully cancelled the move.',
+          });
+        }
       } else if (newStatus === moveStatus.CANCELLED_BY_ADMIN) {
         trackingService.notifyCustomer(customerId, 'move:cancelled', {
           moveId,
