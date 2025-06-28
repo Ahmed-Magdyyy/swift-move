@@ -82,11 +82,11 @@ const getCustomerMoves = asyncHandler(async (req, res, next) => {
 // @route   GET /api/moves/driver
 // @access  Private (Driver)
 const getDriverMoves = asyncHandler(async (req, res, next) => {
-    const driverId = req.user._id;
+    const driverUserId = req.user._id;
     const { page, limit } = req.query;
 
     try {
-        const { moves, totalPages, currentPage } = await moveRequestService.getMovesForDriver(driverId, { page, limit });
+        const { moves, totalPages, currentPage } = await moveRequestService.getMovesForDriver(driverUserId, { page, limit });
 
         res.status(200).json({
             status: 'success',

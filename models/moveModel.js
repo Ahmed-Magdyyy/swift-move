@@ -9,7 +9,7 @@ const moveSchema = new mongoose.Schema({
     },
     driver: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'user'
+        ref: 'Driver'
     },
     status: {
         type: String,
@@ -107,7 +107,8 @@ const moveSchema = new mongoose.Schema({
     },
     actualTime: {
         pickup: Date,
-        delivery: Date
+        delivery: Date,
+        cancelledAt: Date
     }
 }, {
     timestamps: true

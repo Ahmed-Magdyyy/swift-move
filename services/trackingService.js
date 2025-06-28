@@ -10,7 +10,7 @@ const Driver = require('../models/driverModel');
 class TrackingService {
     constructor() {
         this.io = null;
-        // Stores current driver locations: driverId -> { location: { latitude, longitude }, socketId, timestamp }
+        // Stores current driver locations: driverUserId -> { location: { latitude, longitude }, socketId, timestamp }
         this.driverLocations = new Map();
         // Stores userId -> socketId for quick lookups
         this.connectedUsers = new Map();
@@ -71,29 +71,6 @@ class TrackingService {
                 }
             });
 
-            // --- Generic Room Management ---
-            // Allows clients to join arbitrary rooms.
-            // Services will dictate meaningful room names (e.g., customer:id, driver:id, move:id)
-            socket.on('join_room', (roomName) => {
-                if (roomName) {
-                    socket.join(roomName);
-                    console.log(`[TrackingService] Client ${socket.id} joined room: ${roomName}`);
-                    socket.emit('room_joined', { success: true, roomName });
-                } else {
-                    socket.emit('room_joined', { success: false, message: 'Room name is required.' });
-                }
-            });
-
-            socket.on('leave_room', (roomName) => {
-                if (roomName) {
-                    socket.leave(roomName);
-                    console.log(`[TrackingService] Client ${socket.id} left room: ${roomName}`);
-                    socket.emit('room_left', { success: true, roomName });
-                } else {
-                    socket.emit('room_left', { success: false, message: 'Room name is required.' });
-                }
-            });
-
             // --- Driver-Specific Functionality ---
             socket.on('driver:location_update', async (data) => {
                 // Ensure the user is authenticated and is a driver
@@ -101,7 +78,7 @@ class TrackingService {
                     return socket.emit('error', { message: 'Authentication required or not a driver.' });
                 }
 
-                const driverId = socket.userId;
+                const driverUserId = socket.userId;
                 const { location, moveId } = data; // location is { latitude, longitude }
 
                 if (!location || typeof location.latitude !== 'number' || typeof location.longitude !== 'number' || !moveId) {
@@ -109,12 +86,11 @@ class TrackingService {
                 }
 
                 // Store the driver's most recent location
-                this.driverLocations.set(driverId, { location, socketId: socket.id, timestamp: new Date() });
-                // console.log(`[TrackingService] Driver ${driverId} location updated:`, location);
+                this.driverLocations.set(driverUserId, { location, socketId: socket.id, timestamp: new Date() });
 
                 try {
                     // Find the move to get the customer ID
-                    const move = await Move.findById(moveId).select('customer status').lean();
+                    const move = await Move.findById(moveId).select('driver customer status').lean();
 
                     if (!move || !move.customer) {
                         return socket.emit('location_update_error', { message: 'Associated move or customer not found.' });
@@ -125,7 +101,6 @@ class TrackingService {
                         moveStatus.ACCEPTED,
                         moveStatus.ARRIVED_AT_PICKUP,
                         moveStatus.PICKED_UP,
-                        moveStatus.IN_TRANSIT,
                         moveStatus.ARRIVED_AT_DELIVERY
                     ];
 
@@ -134,7 +109,7 @@ class TrackingService {
 
                         // Notify the specific customer in their private room
                         this.notifyUser(customerId, 'customer:driver_location_updated', {
-                            driverId,
+                            driverId: move.driver.toString(),
                             location,
                             moveId
                         });
@@ -150,14 +125,11 @@ class TrackingService {
                 console.log(`[TrackingService] Socket ${socket.id} disconnected. Reason: ${reason}`);
                 
                 if (socket.userId) {
-                    // Remove from our maps
                     this.connectedUsers.delete(socket.userId);
                     this.driverLocations.delete(socket.userId);
 
-                    // If the disconnected user was a driver, automatically set them to unavailable as a safety net.
                     if (socket.userRole === 'driver') {
                         try {
-                            // Using findOneAndUpdate is more atomic and only acts if they were available
                             const updatedDriver = await Driver.findOneAndUpdate(
                                 { user: socket.userId, isAvailable: true },
                                 { isAvailable: false },
@@ -181,21 +153,6 @@ class TrackingService {
     }
 
     // --- Notification Methods (Public API for other services) ---
-
-    /**
-     * Emits an event to all clients in a specific room.
-     * @param {string} roomName - The target room.
-     * @param {string} eventName - The event to emit.
-     * @param {object} data - The payload for the event.
-     */
-    notifyRoom(roomName, eventName, data) {
-        if (this.io && roomName && eventName) {
-            // console.log(`[TrackingService] Notifying room '${roomName}', Event: '${eventName}', Data:`, data);
-            this.io.to(roomName).emit(eventName, data);
-        } else {
-            console.warn(`[TrackingService] Failed to notify room. IO ready: ${!!this.io}, Room: ${roomName}, Event: ${eventName}`);
-        }
-    }
 
     /**
      * Sends a notification to a specific user's private room.
@@ -222,33 +179,31 @@ class TrackingService {
 
     /**
      * Notifies a specific driver by sending an event to their private room.
-     * @param {string} driverId The driver's user ID.
+     * @param {string} driverUserId The driver's user ID.
      * @param {string} eventName The event name.
      * @param {object} data The payload.
      */
-    notifyDriver(driverId, eventName, data) {
-        if (!driverId || !eventName) {
-            console.warn(`[TrackingService] Cannot notify driver: missing driverId or eventName`);
+    notifyDriver(driverUserId, eventName, data) {
+        if (!driverUserId || !eventName) {
+            console.warn(`[TrackingService] Cannot notify driver: missing driverUserId or eventName`);
             return;
         }
         
-        const userRoom = `user_${driverId}`;
+        const userRoom = `user_${driverUserId}`;
         
         if (!this.io) {
             console.error('[TrackingService] Socket.IO not initialized');
             return;
         }
         
-        // Check if the room exists and has active sockets
         const roomSockets = this.io.sockets.adapter.rooms.get(userRoom);
         if (!roomSockets || roomSockets.size === 0) {
-            console.warn(`[TrackingService] No active sockets found for driver ${driverId}. Driver might be offline.`);
+            console.warn(`[TrackingService] No active sockets found for driver ${driverUserId}. Driver might be offline.`);
             return;
         }
         
-        // Emit the event to the room
         this.io.to(userRoom).emit(eventName, data);
-        console.log(`[TrackingService] Sent '${eventName}' to driver ${driverId}`);
+        console.log(`[TrackingService] Sent '${eventName}' to driver ${driverUserId}`);
     }
 
     // --- Internal Helper Methods ---
@@ -265,7 +220,6 @@ class TrackingService {
                 console.error("[TrackingService] googleMapsService or calculateRoute method is not available.");
                 return Infinity;
             }
-            // Ensure points are valid arrays of two numbers
             if (!Array.isArray(point1) || point1.length !== 2 || !Array.isArray(point2) || point2.length !== 2) {
                 console.error('[TrackingService] Invalid points for _calculateDistanceInternal:', point1, point2);
                 return Infinity;
@@ -280,11 +234,11 @@ class TrackingService {
 
     /**
      * Retrieves the last known location of a driver.
-     * @param {string} driverId
+     * @param {string} driverUserId
      * @returns {object | null} Location object or null.
      */
-    getDriverLocation(driverId) {
-        return this.driverLocations.get(driverId)?.location || null;
+    getDriverLocation(driverUserId) {
+        return this.driverLocations.get(driverUserId)?.location || null;
     }
 
     /**

@@ -120,11 +120,11 @@ class GoogleMapsService {
             }));
 
             return driverResults.map(driver => ({
-                driverId: driver.user._id.toString(),
+                driverId: driver._id.toString(),
+                driverUserId: driver.user._id.toString(),
                 name: driver.user.name,
                 phone: driver.user.phone,
                 averageRating: driver.user.averageRating,
-                profileImage: driver.user.profileImage,
                 vehicle: driver.vehicle,
                 currentLocation: driver.currentLocation.coordinates,
             }));
