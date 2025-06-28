@@ -50,7 +50,7 @@ router.route('/profile')
         updateDriverProfile
     );
 
-router.put('/ToggleAvailability', allowedTo('driver'), updateAvailability);
+router.put('/availability', allowedTo('driver'), updateAvailability);
 router.put('/location', allowedTo('driver'), validateUpdateLocation, updateLocation);
 
 

@@ -99,37 +99,50 @@ exports.updateLocation = asyncHandler(async (req, res, next) => {
     });
 });
 
-// @desc    Update driver availability
+// @desc    Update driver availability and location upon going online
 // @route   PUT /api/v1/drivers/availability
 // @access  Private (Driver only)
 exports.updateAvailability = asyncHandler(async (req, res, next) => {
+    const { isAvailable, coordinates } = req.body;
+
     const driver = await Driver.findOne({ user: req.user._id });
 
     if (!driver) {
         return next(new ApiError('Driver not found', 404));
     }
 
-    if (driver.status !== "accepted") {
-        return next(new ApiError('Can not update availability. Driver is not accepted', 400));
+    if (driver.status !== 'accepted') {
+        return next(new ApiError('Cannot update availability. Driver is not an accepted partner.', 400));
     }
 
-    const newAvailability = !driver.isAvailable;
+    const updatedFields = { isAvailable };
 
-    // **Heartbeat Check**
-    // If the driver is trying to go ONLINE, check if they have an active WebSocket connection.
-    if (newAvailability === true) {
-        if (!trackingService.isUserConnected(req.user._id)) {
+    // If the driver is going ONLINE, we require a location and must check their real-time connection.
+    if (isAvailable === true) {
+        if (!coordinates || !Array.isArray(coordinates) || coordinates.length !== 2) {
+            return next(new ApiError('Valid coordinates are required to go online.', 400));
+        }
+
+        // Heartbeat Check: Ensure a live socket connection exists.
+        if (!trackingService.isUserConnected(req.user._id.toString())) {
             return next(new ApiError('Could not establish a real-time connection. Please check your internet and try again.', 400));
         }
+
+        updatedFields.currentLocation = {
+            type: 'Point',
+            coordinates: [coordinates[0], coordinates[1]], // [longitude, latitude]
+        };
     }
 
-    // Set the new availability status
-    driver.isAvailable = newAvailability;
-    await driver.save();
+    const updatedDriver = await Driver.findByIdAndUpdate(driver._id, updatedFields, { new: true });
 
     res.status(200).json({
         status: 'success',
-        data: driver
+        message: `Driver is now ${isAvailable ? 'online' : 'offline'}.`,
+        data: {
+            isAvailable: updatedDriver.isAvailable,
+            currentLocation: updatedDriver.currentLocation,
+        },
     });
 });
 

@@ -299,6 +299,25 @@ class MoveRequestService {
         this.pendingDriverNotifications.delete(moveId);
       }
 
+      // Calculate a real-time ETA for the customer
+      let estimatedArrival = "5-10 minutes";
+      try {
+        const driverLocation = trackingService.getDriverLocation(driverUserId);
+        const pickupLocation = move.pickup.coordinates.coordinates;
+
+        if (driverLocation) {
+          const route = await googleMapsService.calculateRoute(
+            [driverLocation.longitude, driverLocation.latitude],
+            pickupLocation
+          );
+          if (route && route.durationText) {
+            estimatedArrival = route.durationText;
+          }
+        }
+      } catch (etaError) {
+        console.error(`[MoveRequestService] Could not calculate ETA for move ${moveId}:`, etaError);
+      }
+
       // Notify the customer that their move was accepted
       trackingService.notifyCustomer(
         move.customer._id.toString(),
@@ -315,7 +334,7 @@ class MoveRequestService {
             vehicle: driver.vehicle,
             rating: driver.rating,
           },
-          estimatedArrival: "5-10 minutes", // You might want to calculate this
+          estimatedArrival: estimatedArrival,
         }
       );
 
@@ -460,36 +479,28 @@ class MoveRequestService {
           populate: { path: "user", select: "_id name email phone image" },
         })
         .session(session);
+
       if (!move) throw new ApiError("Move not found.", 404);
 
-      if (
-        !move.driver ||
-        move.driver.user._id.toString() !== driverUserId.toString()
-      ) {
+      if (!move.driver || move.driver.user._id.toString() !== driverUserId.toString()) {
         throw new ApiError("Driver not authorized for this move.", 403);
       }
 
       if (move.status === moveStatus.DELIVERED) {
-        throw new ApiError(
-          "Cant update move status as it is already delivered.",
-          400
-        );
+        throw new ApiError("Cannot update move status as it is already delivered.", 400);
       }
 
       if (!this._isValidStatusTransition(move.status, newStatus)) {
-        throw new ApiError(
-          `Invalid status transition from ${move.status} to ${newStatus}.`,
-          400
-        );
+        throw new ApiError(`Invalid status transition from ${move.status} to ${newStatus}.`, 400);
       }
 
       move.status = newStatus;
+      await move.save({ session });
 
       if (newStatus === moveStatus.DELIVERED) {
         await this._finalizeMoveCompletion(move, session);
       }
 
-      await move.save({ session });
       await session.commitTransaction();
 
       // --- Notify Customer of Progress ---
@@ -498,16 +509,13 @@ class MoveRequestService {
 
       switch (newStatus) {
         case moveStatus.ARRIVED_AT_PICKUP:
-          notificationMessage =
-            "Your driver has arrived at the pickup location.";
+          notificationMessage = "Your driver has arrived at the pickup location.";
           break;
         case moveStatus.PICKED_UP:
-          notificationMessage =
-            "Your items have been picked up and the move is now in transit.";
+          notificationMessage = "Your items have been picked up and the move is now in transit.";
           break;
         case moveStatus.ARRIVED_AT_DELIVERY:
-          notificationMessage =
-            "Your driver has arrived at the delivery location.";
+          notificationMessage = "Your driver has arrived at the delivery location.";
           break;
         case moveStatus.DELIVERED:
           notificationMessage = "Your move has been successfully completed!";
@@ -520,18 +528,6 @@ class MoveRequestService {
           status: newStatus,
           message: notificationMessage,
         });
-      }
-
-      // --- Notify Driver on Completion ---
-      if (newStatus === moveStatus.DELIVERED) {
-        trackingService.notifyDriver(
-          move.driver.user._id.toString(),
-          "move:completed_on_driver_side",
-          {
-            moveId,
-            message: "Move successfully completed. Thank you!",
-          }
-        );
       }
 
       return move.toObject();
@@ -715,14 +711,31 @@ class MoveRequestService {
     }
   }
 
-  async _finalizeMoveCompletion(move, existingSession) {
-    const driver = await Driver.findOne({ user: move.driver }).session(
-      existingSession
-    ); // Use findOne with user ref
-    if (driver) {
-      driver.isAvailable = true;
-      await driver.save({ session: existingSession });
-    }
+  async _finalizeMoveCompletion(move, session) {
+    console.log(`[MoveRequestService] Finalizing move ${move._id}`);
+
+    if (!move.driver) return;
+
+    // 1. Update the driver's status to make them available again at the drop-off location.
+    await Driver.findByIdAndUpdate(
+      move.driver._id,
+      {
+        isAvailable: true,
+        currentLocation: move.delivery.coordinates,
+      },
+      { session }
+    );
+    console.log(`[MoveRequestService] Driver ${move.driver._id} is now available.`);
+
+    // 2. Notify the driver that the move is complete.
+    trackingService.notifyDriver(
+      move.driver.user._id.toString(),
+      "move:completed",
+      {
+        moveId: move._id.toString(),
+        message: "You have successfully completed the move!",
+      }
+    );
   }
 
   async cancelMoveRequest(

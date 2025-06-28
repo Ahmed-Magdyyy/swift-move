@@ -72,8 +72,8 @@ class TrackingService {
             });
 
             // --- Driver-Specific Functionality ---
+
             socket.on('driver:location_update', async (data) => {
-                // Ensure the user is authenticated and is a driver
                 if (!socket.userId || socket.userRole !== 'driver') {
                     return socket.emit('error', { message: 'Authentication required or not a driver.' });
                 }
@@ -85,11 +85,11 @@ class TrackingService {
                     return socket.emit('location_update_error', { message: 'Valid location and moveId are required.' });
                 }
 
-                // Store the driver's most recent location
+                // 1. Update in-memory map for real-time ETA calculations
                 this.driverLocations.set(driverUserId, { location, socketId: socket.id, timestamp: new Date() });
 
+                // 2. Notify the customer who is actively tracking this move
                 try {
-                    // Find the move to get the customer ID
                     const move = await Move.findById(moveId).select('driver customer status').lean();
 
                     if (!move || !move.customer) {
@@ -160,11 +160,28 @@ class TrackingService {
      * @param {string} eventName The name of the socket event.
      * @param {object} data The payload to send.
      */
-    notifyUser(userId, eventName, data) {
-        if (!userId || !eventName) return;
+    notifyUser(userId, eventName, data, userType = 'user') {
+        if (!userId || !eventName) {
+            console.warn(`[TrackingService] Cannot notify ${userType}: missing ID or eventName`);
+            return;
+        }
+
+        if (!this.io) {
+            console.error('[TrackingService] Socket.IO not initialized');
+            return;
+        }
+        
         const userRoom = `user_${userId}`;
+        const roomSockets = this.io.sockets.adapter.rooms.get(userRoom);
+
+        if (!roomSockets || roomSockets.size === 0) {
+            // This is a common case (user is offline), so a simple log is fine.
+            console.log(`[TrackingService] No active sockets for ${userType} ${userId}. User might be offline.`);
+            return;
+        }
+        
         this.io.to(userRoom).emit(eventName, data);
-        console.log(`[TrackingService] Emitted '${eventName}' to secure room ${userRoom}`);
+        console.log(`[TrackingService] Emitted '${eventName}' to ${userType} ${userId}`);
     }
 
     /**
@@ -174,7 +191,7 @@ class TrackingService {
      * @param {object} data The payload.
      */
     notifyCustomer(customerId, eventName, data) {
-        this.notifyUser(customerId, eventName, data);
+        this.notifyUser(customerId, eventName, data, 'customer');
     }
 
     /**
@@ -184,26 +201,7 @@ class TrackingService {
      * @param {object} data The payload.
      */
     notifyDriver(driverUserId, eventName, data) {
-        if (!driverUserId || !eventName) {
-            console.warn(`[TrackingService] Cannot notify driver: missing driverUserId or eventName`);
-            return;
-        }
-        
-        const userRoom = `user_${driverUserId}`;
-        
-        if (!this.io) {
-            console.error('[TrackingService] Socket.IO not initialized');
-            return;
-        }
-        
-        const roomSockets = this.io.sockets.adapter.rooms.get(userRoom);
-        if (!roomSockets || roomSockets.size === 0) {
-            console.warn(`[TrackingService] No active sockets found for driver ${driverUserId}. Driver might be offline.`);
-            return;
-        }
-        
-        this.io.to(userRoom).emit(eventName, data);
-        console.log(`[TrackingService] Sent '${eventName}' to driver ${driverUserId}`);
+        this.notifyUser(driverUserId, eventName, data, 'driver');
     }
 
     // --- Internal Helper Methods ---
