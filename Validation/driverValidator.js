@@ -46,6 +46,31 @@ exports.validateUpdateProfile = [
     validatorMiddleware,
 ];
 
+
+
+exports.validateUpdateAvailability = [
+    check("isAvailable")
+        .notEmpty()
+        .withMessage("isAvailable is required")
+        .isBoolean()
+        .withMessage("isAvailable must be a boolean value (true or false)"),
+
+    check("coordinates")
+        .if(body("isAvailable").equals("true"))
+        .notEmpty()
+        .withMessage("Coordinates are required when setting isAvailable to true")
+        .isArray({ min: 2, max: 2 }) 
+        .withMessage("Coordinates must be an array of 2 numbers [longitude, latitude]")
+        .custom((value) => {
+            if (!value.every(coord => typeof coord === 'number')) {
+                throw new Error("Coordinates must be numbers");
+            }
+            return true;
+        }),
+
+    validatorMiddleware,
+];
+
 exports.validateUpdateLocation = [
     check("coordinates")
         .notEmpty()
@@ -65,8 +90,8 @@ exports.validateUpdateStatus = [
     check("status")
         .notEmpty()
         .withMessage("Status is required")
-        .isIn(['pending', 'accepted', 'rejected', 'suspended'])
-        .withMessage("Status must be one of: pending, accepted, rejected, suspended"),
+        .isIn(Object.values(driverStatus))
+        .withMessage(`Status must be one of: ${Object.values(driverStatus).join(", ")}`),
     check("reason")
         .if(body("status").isIn(["rejected", "suspended"]))
         .notEmpty()

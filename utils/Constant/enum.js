@@ -17,6 +17,13 @@ const enabledControls = {
   USERS: "users",
 };
 
+const driverStatus = {
+  PENDING: "pending",
+  ACCEPTED: "accepted",
+  REJECTED: "rejected",
+  SUSPENDED: "suspended",
+};
+
 const moveStatus = {
   PENDING: "pending",
   ACCEPTED: "accepted",
@@ -41,6 +48,7 @@ Object.freeze(roles);
 Object.freeze(accountStatus);
 Object.freeze(providers);
 Object.freeze(enabledControls);
+Object.freeze(driverStatus);
 Object.freeze(moveStatus);
 Object.freeze(vehicleType);
 
@@ -49,6 +57,7 @@ module.exports = {
   accountStatus,
   providers,
   enabledControls,
+  driverStatus,
   moveStatus,
   vehicleType
 };

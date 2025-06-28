@@ -19,7 +19,8 @@ const {
     validateUpdateProfile,
     validateUpdateLocation,
     validateUpdateStatus,
-    validateRateDriver
+    validateRateDriver,
+    validateUpdateAvailability
 } = require('../Validation/driverValidator');
 
 router.use(protect)
@@ -50,7 +51,7 @@ router.route('/profile')
         updateDriverProfile
     );
 
-router.put('/availability', allowedTo('driver'), updateAvailability);
+router.put('/availability', allowedTo('driver'), validateUpdateAvailability, updateAvailability);
 router.put('/location', allowedTo('driver'), validateUpdateLocation, updateLocation);
 
 
