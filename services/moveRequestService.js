@@ -236,7 +236,7 @@ class MoveRequestService {
 
   async acceptMoveRequest(moveId, driverUserId) {
     const session = await mongoose.startSession();
-    let move, driver, notificationState;
+    let move, driver, notificationState, route;
 
     try {
       await session.withTransaction(async () => {
@@ -283,7 +283,7 @@ class MoveRequestService {
         if (!move.actualTime) move.actualTime = {};
         driver.isAvailable = false;
 
-        await move.save({ session });
+       move= await move.save({ session });
         await driver.save({ session });
 
         // Get the notification state before we commit the transaction
@@ -302,20 +302,23 @@ class MoveRequestService {
       // Calculate a real-time ETA for the customer
       let estimatedArrival = "5-10 minutes";
       try {
-        const driverLocation = trackingService.getDriverLocation(driverUserId);
+        const driverDBLocation = driver.currentLocation.coordinates;
         const pickupLocation = move.pickup.coordinates.coordinates;
 
-        if (driverLocation) {
-          const route = await googleMapsService.calculateRoute(
-            [driverLocation.longitude, driverLocation.latitude],
+        if (driverDBLocation && pickupLocation) {
+          route = await googleMapsService.calculateRoute(
+            driverDBLocation,
             pickupLocation
           );
-          if (route && route.durationText) {
-            estimatedArrival = route.durationText;
+
+          if (route && route.duration) {
+            estimatedArrival = route.duration;
           }
+        } else {
+          console.warn(`[MoveRequestService] Could not calculate ETA for move ${moveId} because driver location or pickup location was missing.`);
         }
       } catch (etaError) {
-        console.error(`[MoveRequestService] Could not calculate ETA for move ${moveId}:`, etaError);
+        console.error(`[MoveRequestService] CRITICAL: Error during ETA calculation for move ${moveId}:`, etaError);
       }
 
       // Notify the customer that their move was accepted
@@ -334,7 +337,9 @@ class MoveRequestService {
             vehicle: driver.vehicle,
             rating: driver.rating,
           },
+          distance: route.distance,
           estimatedArrival: estimatedArrival,
+          route: route.polyline,
         }
       );
 
