@@ -24,8 +24,7 @@ class TrackingService {
         console.log('[TrackingService] Initialized.');
     }
 
-    registerSocketHandlers(socket) {
-        console.log(`[TrackingService] Registering handlers for socket ${socket.id}`);
+    configureSocketForTracking(socket) {
 
         // --- Driver-Specific Functionality ---
         socket.on('driver:location_update', async (data) => {
@@ -72,20 +71,6 @@ class TrackingService {
                 console.error(`[TrackingService] Error processing location update for move ${moveId}:`, error);
                 socket.emit('location_update_error', { message: 'An internal error occurred.' });
             }
-        });
-
-        socket.on('move:accept_acknowledged_by_server', (data) => {
-            if (!socket.userId || socket.userRole !== 'driver') return;
-            console.log(`[TrackingService] Driver ${socket.userId} acknowledged accepting move ${data.moveId}`);
-        });
-
-        socket.on('move:reject_acknowledged_by_server', (data) => {
-            if (!socket.userId || socket.userRole !== 'driver') return;
-            console.log(`[TrackingService] Driver ${socket.userId} acknowledged rejecting move ${data.moveId}`);
-        });
-
-        socket.on('error', (error) => {
-            console.error(`[TrackingService] Socket error from ${socket.id}:`, error);
         });
     }
 

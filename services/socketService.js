@@ -46,9 +46,8 @@ class SocketService {
 
                     console.log(`[SocketService] Socket ${socket.id} authenticated for user ${socket.userId} (${socket.userRole}).`);
 
-                    // Register the business-logic handlers from other services
-                    trackingService.registerSocketHandlers(socket);
-                    chatService.registerSocketHandlers(socket);
+                    trackingService.configureSocketForTracking(socket);
+                    chatService.configureSocketForChat(socket);
 
                     console.log(`[SocketService] Socket ${socket.id} authenticated for user ${socket.userId} (${socket.userRole}) and joined room ${userRoom}`);
 

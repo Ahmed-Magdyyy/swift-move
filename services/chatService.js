@@ -1,27 +1,19 @@
 const Conversation = require('../models/conversationModel');
 const Message = require('../models/messageModel');
+const Move = require('../models/moveModel');
 const ApiError = require('../utils/ApiError');
 const User = require('../models/userModel');
 const trackingService = require('./trackingService');
 
 class ChatService {
-    /**
-     * Sends a notification to a specific user if they are connected.
-     * @param {string} userId - The ID of the user to notify.
-     * @param {string} event - The WebSocket event name.
-     * @param {object} payload - The data to send.
-     */
-    notifyUser(userId, event, payload) {
-        const socketId = trackingService.connectedUsers.get(userId.toString());
-        if (socketId) {
-            this.io.to(socketId).emit(event, payload);
-        }
-    }
     constructor() {
         this.io = null;
-        this.activeChats = new Map(); // Map of moveId -> Set of participant socketIds
     }
 
+    /**
+     * Initializes the service with a pre-configured Socket.IO server instance.
+     * @param {socketIO.Server} io - The Socket.IO server instance.
+     */
     initialize(io) {
         if (!io) {
             console.error('[ChatService] Socket.IO server instance is required for initialization.');
@@ -31,55 +23,137 @@ class ChatService {
         console.log('[ChatService] Initialized.');
     }
 
-    registerSocketHandlers(socket) {
-        console.log(`[ChatService] Registering handlers for socket ${socket.id}`);
+    /**
+     * Registers all chat-related event handlers for a given socket.
+     * @param {Socket} socket - The socket instance for a connected client.
+     */
+    configureSocketForChat(socket) {
 
-        socket.on('client:join_chat_room', (payload) => {
-            if (!socket.userId) return; // Must be authenticated
+        // Handler for a client wanting to join a chat room for a specific conversation
+        socket.on('chat:join', async (payload) => {
+            if (!socket.userId) {
+                return socket.emit('server:error', { message: 'Authentication required.' });
+            }
             const { conversationId } = payload;
-            if (conversationId) {
-                // TODO: Verify user is a participant before allowing them to join
-                const roomName = `chat_${conversationId}`;
-                socket.join(roomName);
-                console.log(`[ChatService] User ${socket.userId} joined room ${roomName}`);
+            if (!conversationId) {
+                return socket.emit('server:error', { message: 'Conversation ID is required.' });
+            }
+
+            try {
+                // 1. Find the conversation and the associated move
+                const conversation = await Conversation.findById(conversationId).populate({
+                    path: 'move',
+                    select: 'customer driver'
+                });
+
+                if (!conversation || !conversation.move) {
+                    return socket.emit('server:error', { message: 'Associated move for this chat not found.' });
+                }
+
+                // 2. Verify the user is the customer or the driver for the move
+                const { customer, driver } = conversation.move;
+                const userId = socket.userId.toString();
+
+                if (userId !== customer.toString() && userId !== driver.toString()) {
+                    return socket.emit('server:error', { message: 'You are not authorized to join this chat.' });
+                }
+
+                // 3. Join the socket to the room
+                const room = `conversation_${conversationId}`;
+                socket.join(room);
+
+                console.log(`[ChatService] User ${userId} joined chat for conversation ${conversationId}`);
+                socket.emit('chat:joined', { conversationId });
+
+            } catch (error) {
+                console.error(`[ChatService] Error joining chat for conversation ${conversationId}:`, error);
+                socket.emit('server:error', { message: 'An error occurred while joining the chat.' });
             }
         });
 
-        socket.on('client:send_message', async (payload) => {
-            if (!socket.userId) return; // Must be authenticated
+        // Handler for sending a message
+        socket.on('chat:send_message', async (payload) => {
+            if (!socket.userId) {
+                return socket.emit('server:error', { message: 'Authentication required.' });
+            }
+
             const { conversationId, content } = payload;
-            if (conversationId && content) {
-                try {
-                    await this.sendMessage(socket.userId, conversationId, content);
-                } catch (error) {
-                    socket.emit('server:error', { message: error.message });
+            if (!conversationId || !content) {
+                return socket.emit('server:error', { message: 'Conversation ID and message content are required.' });
+            }
+
+            try {
+                // 1. Verify the conversation exists and the user is a participant (re-check for security)
+                const conversation = await Conversation.findById(conversationId).populate({ path: 'move', select: 'customer driver' });
+                if (!conversation || !conversation.move) {
+                    return socket.emit('server:error', { message: 'Conversation not found.' });
                 }
+
+                const { customer, driver } = conversation.move;
+                const userId = socket.userId.toString();
+
+                if (userId !== customer.toString() && userId !== driver.toString()) {
+                    return socket.emit('server:error', { message: 'You are not authorized to send messages in this chat.' });
+                }
+
+                // 2. Create and save the new message
+                const message = new Message({
+                    conversation: conversationId,
+                    sender: userId,
+                    content: content
+                });
+                await message.save();
+
+                // 3. Broadcast the message to the room
+                const room = `conversation_${conversationId}`;
+                this.io.to(room).emit('chat:new_message', {
+                    _id: message._id,
+                    conversation: message.conversation,
+                    sender: message.sender,
+                    content: message.content,
+                    createdAt: message.createdAt
+                });
+
+                console.log(`[ChatService] Message sent by ${userId} in conversation ${conversationId}`);
+
+            } catch (error) {
+                console.error(`[ChatService] Error sending message in conversation ${conversationId}:`, error);
+                socket.emit('server:error', { message: 'An error occurred while sending the message.' });
             }
         });
-    }
 
-    handleDisconnect(socket) {
-        // On disconnect, remove the socket from any active chat rooms it was in
-        for (const [moveId, sockets] of this.activeChats.entries()) {
-            if (sockets.has(socket.id)) {
-                sockets.delete(socket.id);
-                if (sockets.size === 0) {
-                    this.activeChats.delete(moveId);
-                }
-                console.log(`[ChatService] Removed socket ${socket.id} from active chat for move ${moveId}`);
+        // Handler for when a user starts typing
+        socket.on('chat:typing', (payload) => {
+            const { conversationId } = payload;
+            if (conversationId && socket.userId) {
+                const room = `conversation_${conversationId}`;
+                socket.to(room).emit('chat:typing', { userId: socket.userId });
             }
-        }
-    }
+        });
 
-    // Get active participants for a move
-    getActiveParticipants(moveId) {
-        return this.activeChats.get(moveId)?.size || 0;
+        // Handler for when a user stops typing
+        socket.on('chat:stop_typing', (payload) => {
+            const { conversationId } = payload;
+            if (conversationId && socket.userId) {
+                const room = `conversation_${conversationId}`;
+                socket.to(room).emit('chat:stop_typing', { userId: socket.userId });
+            }
+        });
     }
 
     /**
-     * Get all conversations for a specific user, sorted by the most recent activity.
+     * Handles cleanup when a socket disconnects.
+     * This can be used for presence management in the future.
+     * @param {Socket} socket - The disconnected socket instance.
+     */
+    handleDisconnect(socket) {
+        // In the future, we could manage user's online status in different conversations here
+        console.log(`[ChatService] Handling disconnect for socket ${socket.id}`);
+    }
+
+    /**
+     * Get all conversations for a specific user.
      * @param {string} userId - The ID of the user.
-     * @returns {Promise<Array>} - A promise that resolves to an array of conversations.
      */
     async getMyConversations(userId) {
         const conversations = await Conversation.find({ participants: userId })
