@@ -150,11 +150,10 @@ exports.getLoggedUser = asyncHandler(async (req, res, next) => {
 });
 
 exports.updateLoggedUserPassword = asyncHandler(async (req, res, next) => {
-  //1) update user password based on user's payload (req.user._id)
   const { currentPassword, newPassword } = req.body;
 
-  const user = await usersModel.findById(req.user._id);
-
+  const user = await usersModel.findById(req.user._id).select("+password");
+  
   if ((await bcrypt.compare(currentPassword, user.password)) == true) {
     const Updateduser = await usersModel.findByIdAndUpdate(
       req.user._id,
@@ -165,12 +164,11 @@ exports.updateLoggedUserPassword = asyncHandler(async (req, res, next) => {
       {
         new: true,
       }
+      
     );
 
-    // 2) generate new token
 
-    const token = createToken(user._id, user.role);
-    res.status(200).json({ data: Updateduser, token });
+    res.status(200).json({message:"password changed successfully", data: Updateduser });
   } else {
     return next(new ApiError("Current password is incorrect", 401));
   }

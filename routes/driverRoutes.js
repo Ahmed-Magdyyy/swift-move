@@ -33,7 +33,7 @@ router.post(
         { name: 'carDrivingLicense', maxCount: 1 },
         { name: 'personalDrivingLicense', maxCount: 1 }
     ]),
-    allowedTo('driver'),
+    allowedTo('driver', 'customer'),
     validateOnboarding,
     submitOnboarding
 );
