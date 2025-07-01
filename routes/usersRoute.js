@@ -1,7 +1,7 @@
 const express = require("express");
 const Router = express.Router();
 
-const { createUserValidator,updateUserValidator } = require("../Validation/userValidator");
+const { createUserValidator,updateUserValidator,updateLoggedUserPasswordValidator } = require("../Validation/userValidator");
 
 const {
   //----- Admin Routes -----
@@ -34,7 +34,7 @@ const {
 Router.use(protect);
 
 Router.get("/getLoggedUser", getLoggedUser, getUser);
-Router.put("/updateLoggedUserPassword", updateLoggedUserPassword);
+Router.put("/updateLoggedUserPassword",updateLoggedUserPasswordValidator, updateLoggedUserPassword);
 Router.put(
   "/updateLoggedUserData",
   cloudUpload({}).single("image"),

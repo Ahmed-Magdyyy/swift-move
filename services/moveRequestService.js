@@ -872,6 +872,65 @@ class MoveRequestService {
       session.endSession();
     }
   }
+
+  async getAllMoves(queryParams) {
+    const { page, limit, ...query } = queryParams;
+
+    let filter = {};
+
+    // // Build a robust filter object from query parameters
+    // for (const key in query) {
+    //   if (Object.prototype.hasOwnProperty.call(query, key)) {
+    //     const value = query[key];
+
+    //     // Validate ObjectIds to prevent crashes from invalid formats
+    //     if ((key === 'customer' || key === 'driver') && !mongoose.Types.ObjectId.isValid(value)) {
+    //         // If an invalid ID is provided, no results can match. Return empty.
+    //         return { totalPages: 0, page: 1, results: 0, data: [] };
+    //     }
+
+    //     // Apply filter based on key
+    //     if (['customer', 'driver', 'status', 'vehicleType'].includes(key)) {
+    //         filter[key] = value; // Exact match for IDs and enums
+    //     } else {
+    //         // Fallback for other potential string fields
+    //         filter[key] = { $regex: value, $options: 'i' };
+    //     }
+    //   }
+    // }
+
+    Object.keys(query).forEach((key) => {
+      if (typeof query[key] === "string") {
+        filter[key] = { $regex: query[key], $options: "i" };
+      } else {
+        filter[key] = query[key];
+      }
+    });
+
+    const pageNum = parseInt(page, 10) || 1;
+    const limitNum = parseInt(limit, 10) || 10;
+    const skipNum = (pageNum - 1) * limitNum;
+
+    // Get total count for pagination using the constructed filter
+    const totalMovesCount = await Move.countDocuments(filter);
+    const totalPages = Math.ceil(totalMovesCount / limitNum);
+
+    // Fetch moves with filter, population, sorting, and pagination
+    const moves = await Move.find(filter)
+      .populate({ path: 'customer', select: 'name email phone' })
+      .populate({ path: 'driver', select: 'name email phone' })
+      .sort({ createdAt: -1 })
+      .skip(skipNum)
+      .limit(limitNum)
+      .lean();
+
+    return {
+      totalPages,
+      page: pageNum,
+      results: moves.length,
+      data: moves,
+    };
+  }
 }
 
 module.exports = new MoveRequestService();

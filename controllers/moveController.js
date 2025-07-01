@@ -3,6 +3,15 @@ const pricingService = require('../services/pricingService');
 const moveRequestService = require('../services/moveRequestService');
 const ApiError = require('../utils/ApiError');
 
+
+// @desc    Get all move requests
+// @route   GET /api/moves
+// @access  Private (Admin)
+const getAllMoves = asyncHandler(async (req, res, next) => {
+  const result = await moveRequestService.getAllMoves(req.query);
+  res.status(200).json(result);
+});
+
 // @desc    Get price estimate for a move
 // @route   POST /api/moves/estimate
 // @access  Private (Customer)
@@ -78,7 +87,7 @@ const getCustomerMoves = asyncHandler(async (req, res, next) => {
     }
 });
 
-// @desc    Get all moves for a driver (e.g., assigned or completed)
+// @desc    Get all moves for a driver
 // @route   GET /api/moves/driver
 // @access  Private (Driver)
 const getDriverMoves = asyncHandler(async (req, res, next) => {
@@ -178,7 +187,7 @@ const updateMoveProgress = asyncHandler(async (req, res, next) => {
 
 // @desc    Cancel a move
 // @route   POST /api/moves/:moveId/cancel
-// @access  Private (Customer, or Driver under certain conditions, or Admin)
+// @access  Private (Customer or assigned Driver or Admin)
 const cancelMove = asyncHandler(async (req, res, next) => {
     const { id: moveId } = req.params;
     const { _id: userId, role: userRole } = req.user;
@@ -198,6 +207,7 @@ const cancelMove = asyncHandler(async (req, res, next) => {
 
 
 module.exports = {
+    getAllMoves,
     getPriceEstimate,
     createMoveRequest,
     getCustomerMoves,

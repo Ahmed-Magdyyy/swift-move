@@ -114,3 +114,27 @@ exports.updateUserValidator = [
 
   validatorMiddleware,
 ];
+
+exports.updateLoggedUserPasswordValidator = [
+
+  check("newPassword")
+    .notEmpty()
+    .withMessage("Password is required")
+    .isLength({ min: 6 })
+    .withMessage("Password must be at least 6 characters")
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{6,}$/)
+    .withMessage("Password must contain uppercase, lowercase, and number")
+    .custom((value, { req }) => {
+      if (value === req.body.currentPassword) throw new Error("new password must be different from current password!")
+      if (value !== req.body.cNewPassword) {
+        throw new Error("Password confirmation does not match");
+      }
+      return true;
+    }),
+
+  check("cNewPassword")
+    .notEmpty()
+    .withMessage("Confirmation password is required"),
+
+  validatorMiddleware,
+]
