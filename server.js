@@ -11,13 +11,14 @@ const cookieParser = require("cookie-parser");
 const ApiError = require("./utils/ApiError");
 const globalError = require("./middlewares/errorMiddleware");
 const dbConnection = require("./config/database");
-
+const mongoSanitize = require('express-mongo-sanitize');
 const socketService = require('./services/socketService');
 const trackingService = require("./services/trackingService");
 const chatService = require("./services/chatService");
 
 // Routes
 const mountRoutes = require("./routes");
+const { default: helmet } = require("helmet");
 
 // middlewares
 app.use(express.urlencoded({ extended: false }));
@@ -53,7 +54,10 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
   console.log(`mode: ${process.env.NODE_ENV}`);
 }
-
+//mongo sanitize
+app.use(mongoSanitize());
+//helmet
+app.use(helmet())
 // DB connecetion
 dbConnection();
 
