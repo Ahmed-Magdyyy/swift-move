@@ -503,6 +503,44 @@ class MoveRequestService {
       await move.save({ session });
 
       if (newStatus === moveStatus.DELIVERED) {
+        // --- Payment Logic ---
+        if (move.payment && move.payment.method === 'CASH') {
+          move.payment.status = 'completed';
+          await move.save({ session });
+          trackingService.notifyCustomer(move.customer._id.toString(), "move:payment_completed", {
+            moveId: move._id.toString(),
+            message: "تم الدفع نقداً بنجاح. شكراً لاستخدامك Swift Move!",
+          });
+        } else if (move.payment && move.payment.method === 'VISA') {
+          const Stripe = require('stripe');
+          const stripe = new Stripe(process.env.STRIPE_KEY);
+          const sessionStripe = await stripe.checkout.sessions.create({
+            mode: "payment",
+            payment_method_types: ["card"],
+            success_url: process.env.SUCCESS_URL,
+            cancel_url: process.env.CANCEL_URL,
+            customer_email: move.customer.email,
+            client_reference_id: move._id.toString(),
+            line_items: [{
+              price_data: {
+                currency: "EGP",
+                product_data: {
+                  name: "Move Payment",
+                },
+                unit_amount: move.pricing.totalPrice * 100,
+              },
+              quantity: 1,
+            }],
+            metadata: {
+              moveId: move._id.toString(),
+            },
+          });
+          trackingService.notifyCustomer(move.customer._id.toString(), "move:payment_required", {
+            url: sessionStripe.url,
+            moveId: move._id.toString(),
+            message: "يرجى إتمام عملية الدفع لإكمال الطلب.",
+          });
+        }
         await this._finalizeMoveCompletion(move, session);
       }
 
