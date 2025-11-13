@@ -131,7 +131,7 @@ class MoveRequestService {
         (await googleMapsService.getNearbyDrivers(
           pickupCoords,
           vehicleType,
-          5000
+          50000000
         )) || [];
 
       // Manually filter out drivers who have already been excluded in previous attempts
