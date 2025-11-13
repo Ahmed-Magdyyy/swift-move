@@ -71,7 +71,7 @@ class GoogleMapsService {
         }
     }
 
-    async getNearbyDrivers(pickupCoordinates, requestedVehicleType, radius = 5000) { 
+    async getNearbyDrivers(pickupCoordinates, requestedVehicleType, radius = 5000000000000000) { 
         try {
             if (!Array.isArray(pickupCoordinates) || pickupCoordinates.length !== 2) {
                 throw new ApiError('Invalid pickupCoordinates format. Expected [longitude, latitude].', 400);
